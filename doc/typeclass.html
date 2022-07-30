@@ -382,6 +382,18 @@ instance [s : Monoid α] : OfNat α (nat_lit 1) where
 def getUnit [Monoid α] : α :=
   1
 </code></pre>
+<p>Because many users were forgetting the <code>nat_lit</code> when defining <code>OfNat</code> instances, Lean also accepts <code>OfNat</code> instance
+declarations not using <code>nat_lit</code>. Thus, the following is also accepted.</p>
+<pre><code class="language-lean">class Monoid (α : Type u) where
+  unit : α
+  op   : α → α → α
+
+instance [s : Monoid α] : OfNat α 1 where
+  ofNat := s.unit
+
+def getUnit [Monoid α] : α :=
+  1
+</code></pre>
 <h2 id="output-parameters"><a class="header" href="#output-parameters">Output parameters</a></h2>
 <p>By default, Lean only tries to synthesize an instance <code>Inhabited T</code> when the term <code>T</code> is known and does not
 contain missing parts. The following command produces the error
