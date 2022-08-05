@@ -12,12 +12,12 @@ declare -x NIX_BUILD_CORES="2"
 declare -x NIX_BUILD_TOP="/build"
 declare -x NIX_CC="/nix/store/aq67a6bzcjyh6rcjj78miirqjl9rav72-gcc-wrapper-11.3.0"
 declare -x NIX_CC_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu="1"
-declare -x NIX_CFLAGS_COMPILE=" -frandom-seed=9b1zwmcsnx"
+declare -x NIX_CFLAGS_COMPILE=" -frandom-seed=pyipxrxcy9"
 declare -x NIX_ENFORCE_NO_NATIVE="1"
 declare -x NIX_ENFORCE_PURITY="1"
 declare -x NIX_HARDENING_ENABLE="fortify stackprotector pic strictoverflow format relro bindnow"
 declare -x NIX_INDENT_MAKE="1"
-declare -x NIX_LDFLAGS="-rpath /nix/store/9b1zwmcsnx0r4fcq6xnpv1mdqplpj8sa-lean-doc/lib64 -rpath /nix/store/9b1zwmcsnx0r4fcq6xnpv1mdqplpj8sa-lean-doc/lib "
+declare -x NIX_LDFLAGS="-rpath /nix/store/pyipxrxcy95mgkb3lxp6sz994020p3fv-lean-doc/lib64 -rpath /nix/store/pyipxrxcy95mgkb3lxp6sz994020p3fv-lean-doc/lib "
 declare -x NIX_LOG_FD="2"
 declare -x NIX_SSL_CERT_FILE="/no-cert-file.crt"
 declare -x NIX_STORE="/nix/store"
@@ -47,7 +47,7 @@ declare -x buildCommand="mkdir \$out
 # necessary for \`additional-css\`...?
 cp -r --no-preserve=mode \$src/doc/* .
 # overwrite stub .lean.md files
-cp -r /nix/store/vc72f21qpacs6m1q9m696f6nxyc88dpk-examples/* examples/
+cp -r /nix/store/sn09pigmc7wr3mf4995gz75j642z3ygv-examples/* examples/
 mdbook build -d \$out
 "
 declare -x buildInputs="/nix/store/r7fs55jxj7zdpn9jylcixxp7kzlclxjm-lean-mdbook-0.4.18"
@@ -65,7 +65,7 @@ declare -x doCheck=""
 declare -x doInstallCheck=""
 declare -x name="lean-doc"
 declare -x nativeBuildInputs=""
-declare -x out="/nix/store/9b1zwmcsnx0r4fcq6xnpv1mdqplpj8sa-lean-doc"
+declare -x out="/nix/store/pyipxrxcy95mgkb3lxp6sz994020p3fv-lean-doc"
 declare -x outputs="out"
 declare -x patches=""
 declare -x propagatedBuildInputs=""
