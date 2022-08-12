@@ -192,11 +192,11 @@ is the web-based infoview in VSCode.</p>
 to communicate with the Lean server. Thanks to this, they have the same metaprogramming capabilities
 as custom elaborators or the tactic framework. To see this in action, let's implement a <code>#check</code>
 command as a web input form. This example assumes some familiarity with React.</p>
-<p>The first thing we'll need is to create an <em>RPC method</em>. This is basically a Lean function callable
-from widget code (possibly remotely over the internet). Our method will take in the <code>name : Name</code>
-of a constant in the environment and return its type. By convention, we represent the input data
-as a <code>structure</code>. Since it will be sent over from JavaScript, we need <code>FromJson</code> and <code>ToJson</code>.
-We'll see below why the position field is needed.</p>
+<p>The first thing we'll need is to create an <em>RPC method</em>. Meaning &quot;Remote Procedure Call&quot;, this
+is basically a Lean function callable from widget code (possibly remotely over the internet).
+Our method will take in the <code>name : Name</code> of a constant in the environment and return its type.
+By convention, we represent the input data as a <code>structure</code>. Since it will be sent over from JavaScript,
+we need <code>FromJson</code> and <code>ToJson</code>. We'll see below why the position field is needed.</p>
 <pre class="alectryon-io type-info-hidden highlight"><!-- Generator: Alectryon --><span class="alectryon-wsp"><span class="alectryon-token"><span class="kd">structure</span></span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>GetTypeParams</var><b>: </b><span>Type</span></span></div></blockquote></div></small></div>GetTypeParams</span><span class="alectryon-token"> </span><span class="alectryon-token"><span class="k">where</span></span><span class="alectryon-token">
   <span class="sd">/-- Name of a constant to get the type of. -/</span>
   </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>name</var><b>: </b><span>GetTypeParams → Name</span></span></div></blockquote></div></small></div>name</span><span class="alectryon-token"> : </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>Name</var><b>: </b><span>Type</span></span></div></blockquote></div></small></div>Name</span><span class="alectryon-token">
