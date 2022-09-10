@@ -184,8 +184,8 @@ some kind.  Let's examine those function types:</p>
 </ul>
 <p>So <code>map</code> is a pure function, <code>seq</code> is a pure function wrapped in the structure, and <code>bind</code> takes a
 pure input but produces an output wrapped in the structure.</p>
-<p>Note: we are ignoring the <code>(Unit → f α)</code> function also used by <code>seq</code> in this comparison, since that
-was explained in <a href="applicatives.lean.html#lazy-evaluation">Applicatives Lazy Evaluation</a>.</p>
+<p>Note: we are ignoring the <code>(Unit → f α)</code> function used by <code>seq</code> here since that has a special
+purpose explained in <a href="applicatives.lean.html#lazy-evaluation">Applicatives Lazy Evaluation</a>.</p>
 <h2 id="basic-monad-example"><a class="header" href="#basic-monad-example">Basic Monad Example</a></h2>
 <p>Just as <code>Option</code> is a functor and an applicative functor, it is also a monad! Let's start with how
 <code>Option</code> implements the Monad type class.</p>

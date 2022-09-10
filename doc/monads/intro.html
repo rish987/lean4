@@ -162,7 +162,7 @@ still be summed up in a couple simple functions.  Here you will learn how to cre
 <code>Applicative List</code> and a completely custom <code>Applicative</code> type.</p>
 <h2 id="monads-tutorial"><a class="header" href="#monads-tutorial"><a href="monads.lean.html">Monads Tutorial</a></a></h2>
 <p>Now that you have an intuition for how abstract structures work, you'll examine some of the problems
-that functors and applicative functors don't help you solve. Then you'll lean the specifics of how
+that functors and applicative functors don't help you solve. Then you'll learn the specifics of how
 to actually use monads with some examples using the <code>Option</code> monad and the all important <code>IO</code> monad.</p>
 <h2 id="reader-monads"><a class="header" href="#reader-monads"><a href="readers.lean.html">Reader Monads</a></a></h2>
 <p>Now that you understand the details of what makes a monadic structure work, in this section, you'll
@@ -174,19 +174,19 @@ both read from and write to. It opens the door to fully stateful programming, al
 of the things a function programming language supposedly &quot;can't&quot; do.</p>
 <h2 id="except-monad"><a class="header" href="#except-monad"><a href="except.lean.html">Except Monad</a></a></h2>
 <p>Similar to the <code>Option</code> monad the <code>Except</code> monad allows you to change the signature of a function so
-that it can return an <code>ok</code> value or an <code>error</code> and it makes available the classic exception handling
+that it can return an <code>ok</code> value or an <code>error</code> and it provides the classic exception handling
 operations <code>throw/try/catch</code> so that your programs can do monad-based exception handling.</p>
 <h2 id="monad-transformers"><a class="header" href="#monad-transformers"><a href="transformers.lean.html">Monad Transformers</a></a></h2>
-<p>Now that you are familiar with all the above monads it is time to answer the question of how you can
-make them work together. After all, there are definitely times when you need multiple kinds of
+<p>Now that you are familiar with all the above monads it is time to answer the question - how you can
+make them work together? After all, there are definitely times when you need multiple kinds of
 monadic behavior. This section introduces the concept of monad transformers, which allow you to
 combine multiple monads into one.</p>
 <h2 id="monad-laws"><a class="header" href="#monad-laws"><a href="laws.lean.html">Monad Laws</a></a></h2>
-<p>This section examines what makes a monad a monad. After all, can't you just implement these type
-classes any way you want and write a &quot;monad&quot; instance? Starting back with functors and applicative
-functors, you'll learn that all these structures have &quot;laws&quot; that they are expected to obey with
-respect to their behavior. You can make instances that don't follow these laws. But you do so at
-your peril, as other programmers will be very confused when they try to use them.</p>
+<p>This section examines what makes a monad a legal monad. You could just implement your monadic type
+classes any way you want and write &quot;monad&quot; instances, but starting back with functors and
+applicative functors, you'll learn that all these structures have &quot;laws&quot; that they are expected to
+obey with respect to their behavior. You can make instances that don't follow these laws. But you do
+so at your peril, as other programmers will be very confused when they try to use them.</p>
 
                     </main>
 

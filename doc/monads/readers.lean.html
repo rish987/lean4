@@ -142,11 +142,11 @@
                         <h1 id="readers"><a class="header" href="#readers">Readers</a></h1>
 <p>In the <a href="monads.lean.html">previous section</a> you learned about the conceptual idea of monads. You learned
 what they are, and saw how some common types like <code>IO</code> and <code>Option</code> work as monads. Now in this
-part, you will be looking at some other useful monads. In particular, the <code>ReaderM</code> monad.</p>
+section, you will be looking at some other useful monads. In particular, the <code>ReaderM</code> monad.</p>
 <h2 id="how-to-do-global-variables-in-lean"><a class="header" href="#how-to-do-global-variables-in-lean">How to do Global Variables in Lean?</a></h2>
 <p>In Lean, your code is generally &quot;pure&quot;, meaning functions can only interact with the arguments
 passed to them. This effectively means you cannot have global variables. You can have global
-definitions, but these are fixed at compile time. If some user behavior might change them, you have
+definitions, but these are fixed at compile time. If some user behavior might change them, you would have
 to wrap them in the <code>IO</code> monad, which means they can't be used from pure code.</p>
 <p>Consider this example. Here, you want to have an <code>Environment</code> containing different parameters as a
 global variable. However, you want to load these parameters from the process environment variables,
@@ -222,7 +222,7 @@ monad changes the shape of this code. Now the functions <strong>no longer need</
 </span></span><span class="alectryon-sentence"><input class="alectryon-toggle" id="readers-lean-chk1" style="display: none" type="checkbox"><label class="alectryon-input" for="readers-lean-chk1"><span class="alectryon-token"><span class="k">#eval</span></span></label><small class="alectryon-output"><div><div class="alectryon-messages"><blockquote class="alectryon-message">Result: <span class="mi">2946</span>
 </blockquote></div></div></small></span><span class="alectryon-wsp"><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>main2</var><b>: </b><span>IO Unit</span></span></div></blockquote></div></small></div>main2</span><span class="alectryon-token"> <span class="c1">-- Result: 7538</span></span></span></pre>
 <p>The <code>ReaderM</code> monad provides a <code>run</code> method and it is the <code>ReaderM</code> run method that takes the initial
-<code>Environment</code> context.  So here you see <code>main2</code> loads the environment as before, and estabilishes
+<code>Environment</code> context.  So here you see <code>main2</code> loads the environment as before, and establishes
 the <code>ReaderM</code> context by passing <code>env</code> to the <code>run</code> method.</p>
 <blockquote>
 <p><strong>Side note 1</strong>: The <code>return</code> statement used above also needs some explanation.  The <code>return</code>
@@ -242,7 +242,7 @@ the monadic container type.</p>
 <blockquote>
 <p><strong>Side note 2</strong>: If the function <code>readerFunc3</code> also took some explicit arguments then you would have
 to write <code>(readerFunc3 args).run env</code> and this is a bit ugly, so Lean provides an infix operator
-<code>|&gt;</code> that eliminiates those parens so you can write <code>readerFunc3 args |&gt;.run env</code> and then you can
+<code>|&gt;</code> that eliminates those parentheses so you can write <code>readerFunc3 args |&gt;.run env</code> and then you can
 chain multiple monadic actions like this <code>m1 args1 |&gt;.run args2 |&gt;.run args3</code> and this is the
 recommended style.  You will see this patten used heavily in Lean code.</p>
 </blockquote>
@@ -251,8 +251,8 @@ can use it. Each type of monad might provide one or more extra functions like th
 become available only when you are in the context of that monad.</p>
 <p>Here the <code>readerFunc2</code> function uses the <code>bind</code> operator <code>&gt;&gt;=</code> just to show you that there are bind
 operations happening here.  The <code>readerFunc3</code> function uses the <code>do</code> notation you learned about in
-<a href="monads.lean.html">Monads</a> which hides that bind operation and can make the code look cleaner.</p>
-<p>The <code>do</code> notation with <code>let x ← readerFunc2</code> is also calling the <code>bind</code> function under the covers,
+<a href="monads.lean.html">Monads</a> which hides that bind operation and can make the code look cleaner.
+So the expression <code>let x ← readerFunc2</code> is also calling the <code>bind</code> function under the covers,
 so that you can access the unwrapped value <code>x</code> needed for the <code>toString x</code> conversion.</p>
 <p>The important difference here to the earlier code is that <code>readerFunc3</code> and <code>readerFunc2</code> no longer
 have an <strong>explicit</strong> Environment input parameter that needs to be passed along all the way to
@@ -272,19 +272,19 @@ Lean that will show you the reduced types:</p>
 like <code>def f (a : Nat) : String</code> is the same as this function <code>def f : Nat → String</code>.  These are
 exactly equal as types.  Well this is being used by the <code>ReaderM</code> Monad to add an input argument to
 all the functions that use the <code>ReaderM</code> monad and this is why <code>main</code> is able to start things off by
-simply passing that new input argument in <code>readerFunc3 env</code>. So now that you know the implementation
+simply passing that new input argument in <code>readerFunc3.run env</code>. So now that you know the implementation
 details of the <code>ReaderM</code> monad you can see that what it is doing looks very much like the original
 code we wrote at the beginning of this section, only it's taking a lot of the tedious work off your
 plate and it is creating a nice clean separation between what your pure functions are doing, and the
 global context idea that the <code>ReaderM</code> adds.</p>
 <h2 id="withreader"><a class="header" href="#withreader">withReader</a></h2>
 <p>One <code>ReaderM</code> function can call another with a modified version of the <code>ReaderM</code> context. You can
-use the <code>withReader</code> function from the <code>MonadWithReader</code> typeclass to do this:</p>
+use the <code>withReader</code> function from the <code>MonadWithReader</code> type class to do this:</p>
 <pre class="alectryon-io type-info-hidden highlight"><!-- Generator: Alectryon --><span class="alectryon-wsp"><span class="alectryon-token"><span class="kd">def</span></span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>readerFunc3WithReader</var><b>: </b><span>ReaderM Environment String</span></span></div></blockquote></div></small></div><span class="nv">readerFunc3WithReader</span></span><span class="alectryon-token"> : </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>ReaderM</var><b>: </b><span>Type → Type → Type</span></span></div></blockquote></div></small></div>ReaderM</span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>Environment</var><b>: </b><span>Type</span></span></div></blockquote></div></small></div>Environment</span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>String</var><b>: </b><span>Type</span></span></div></blockquote></div></small></div>String</span><span class="alectryon-token"> := </span><span class="alectryon-token"><span class="k">do</span></span><span class="alectryon-token">
   </span><span class="alectryon-token"><span class="k">let</span></span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>x</var><b>: </b><span>Nat</span></span></div></blockquote></div></small></div><span class="nv">x</span></span><span class="alectryon-token"> <span class="bp">←</span> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>withReader</var><b>: </b><span>{ρ : Type} → {m : Type → Type} → [self : MonadWithReader ρ m] → {α : Type} → (ρ → ρ) → m α → m α</span></span></div></blockquote></div></small></div>withReader</span><span class="alectryon-token"> (<span class="bp">λ</span> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>env</var><b>: </b><span>Environment</span></span></div></blockquote></div></small></div><span class="nv">env</span></span><span class="alectryon-token"> <span class="bp">=&gt;</span> { </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>env</var><b>: </b><span>Environment</span></span></div></blockquote></div></small></div><span class="nv">env</span></span><span class="alectryon-token"> </span><span class="alectryon-token"><span class="k">with</span></span><span class="alectryon-token"> user := </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>&quot;new user&quot;</var><b>: </b><span>String</span></span></div></blockquote></div></small></div><span class="s2">&quot;new user&quot;</span></span><span class="alectryon-token"> }) </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>readerFunc2</var><b>: </b><span>ReaderM Environment Nat</span></span></div></blockquote></div></small></div>readerFunc2</span><span class="alectryon-token">
   </span><span class="alectryon-token"><span class="k">return</span></span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>&quot;Result: &quot;</var><b>: </b><span>String</span></span></div></blockquote></div></small></div><span class="s2">&quot;Result: &quot;</span></span><span class="alectryon-token"> <span class="bp">++</span> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>toString</var><b>: </b><span>{α : Type} → [self : ToString α] → α → String</span></span></div></blockquote></div></small></div>toString</span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>x</var><b>: </b><span>Nat</span></span></div></blockquote></div></small></div><span class="nv">x</span></span><span class="alectryon-token"></span></span></pre>
-<p>Here we changed the <code>user</code> in the <code>Environment</code> context to &quot;new user&quot; and then we
-passed that modified context to <code>readerFunc2</code>.</p>
+<p>Here we changed the <code>user</code> in the <code>Environment</code> context to &quot;new user&quot; and then we passed that
+modified context to <code>readerFunc2</code>.</p>
 <p>So <code>withReader f m</code> executes monad <code>m</code> in the <code>ReaderM</code> context modified by <code>f</code>.</p>
 <h2 id="handy-shortcut-with--e"><a class="header" href="#handy-shortcut-with--e">Handy shortcut with (← e)</a></h2>
 <p>If you use the operator <code>←</code> in a let expression and the variable is only used once you can
@@ -298,6 +298,11 @@ call to loadEnv:</p>
 find that in larger code bases, with many different types of monads all composed together this
 greatly cleans up the code. Monads provide a beautiful functional way of managing cross-cutting
 concerns that would otherwise make your code very messy.</p>
+<p>Having this control over the inherited <code>ReaderM</code> context via <code>withReader</code> is actually very useful
+and something that is quite messy if you try and do this sort of thing with global variables, saving
+the old value, setting the new one, calling the function, then restoring the old value, making sure
+you do that in a try/finally block and so on. The <code>ReaderM</code> design pattern avoids that mess
+entirely.</p>
 <p>Now it's time to move on to <a href="states.lean.html">StateM Monad</a> which is like a <code>ReaderM</code> that is
 also updatable.</p>
 
