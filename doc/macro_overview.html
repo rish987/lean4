@@ -442,11 +442,11 @@ example (p : Prop) (h : p) (f : p -&gt; False) : 3 = 2 := by
 <p>In the above example, we're still using the sugar Lean provides for creating
 quotations, as it feels more intuitive and saves us some work. It is possible to
 forego the sugar altogether:</p>
-<pre><code>syntax (name := myExfalsoParser) &quot;myExfalso&quot; : tactic
+<pre><code class="language-lean">syntax (name := myExfalsoParser) &quot;myExfalso&quot; : tactic
 
 @[macro myExfalsoParser] def implMyExfalso : Lean.Macro :=
-  fun stx =&gt; Lean.mkNode `Lean.Parser.Tactic.apply
-    #[Lean.mkAtomFrom stx &quot;apply&quot;, Lean.mkCIdentFrom stx ``False.elim]
+  fun stx =&gt; pure (Lean.mkNode `Lean.Parser.Tactic.apply
+    #[Lean.mkAtomFrom stx &quot;apply&quot;, Lean.mkCIdentFrom stx ``False.elim])
 
 example (p : Prop) (h : p) (f : p -&gt; False) : 3 = 2 := by
   myExfalso
