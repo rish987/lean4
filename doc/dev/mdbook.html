@@ -141,7 +141,7 @@
                     <main>
                         <h1 id="documentation"><a class="header" href="#documentation">Documentation</a></h1>
 <p>The Lean <code>doc</code> folder contains the <a href="https://leanprover.github.io/lean4/doc/">Lean Manual</a> and is
-authored in a combination of markdown (*.md) files and literate Lean files.  The .lean files are
+authored in a combination of markdown (<code>*.md</code>) files and literate Lean files.  The .lean files are
 preprocessed using a tool called <a href="https://github.com/leanprover/leanink">LeanInk</a> and
 <a href="https://github.com/Kha/alectryon">Alectryon</a> which produces a generated markdown file.  We then run
 <code>mdbook</code> on the result to generate the html pages.</p>
@@ -183,28 +183,29 @@ Then run the following:</p>
 </code></pre>
 </li>
 <li>
-<p>Clone https://github.com/leanprover/LeanInk.git and run <code>lake build</code> then copy the resulting
-executable to your <code>$HOME/.elan/bin</code> folder or <code>%USERPROFILE%\.elan\bin</code> so Alectryon can find it
-there.</p>
+<p>Clone https://github.com/leanprover/LeanInk.git and run <code>lake build</code> then make the resulting
+binary available to Alectryon using e.g.</p>
+<pre><code class="language-bash"># make `leanInk` available in the current shell
+export PATH=$PWD/build/bin:$PATH
+</code></pre>
 </li>
 <li>
 <p>Create a Python 3.10 environment.</p>
 </li>
 <li>
-<p>Install the following packages:</p>
+<p>Install Alectryon:</p>
 <pre><code>python3 -m pip install git+https://github.com/Kha/alectryon.git@typeid
 </code></pre>
 </li>
 <li>
-<p>Now you are ready to process the *.lean files using Alectryon as follows:</p>
+<p>Now you are ready to process the <code>*.lean</code> files using Alectryon as follows:</p>
 <pre><code>cd lean4/doc
-alectryon --frontend lean4+markup examples\palindromes.lean --backend webpage -o palindromes.lean.md
+alectryon --frontend lean4+markup examples/palindromes.lean --backend webpage -o palindromes.lean.md
 </code></pre>
+<p>Repeat this for the other .lean files you care about or write a script to process them all.</p>
 </li>
-</ol>
-<p>And repeat this for the other .lean files you care about or write a script to process them all.</p>
-<ol>
-<li>Now you can build the book using:
+<li>
+<p>Now you can build the book using:</p>
 <pre><code>cd lean4/doc
 mdbook build
 </code></pre>

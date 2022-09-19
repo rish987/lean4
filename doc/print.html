@@ -5007,8 +5007,8 @@ from the context and as a result the code is now looking really clean.</p>
   </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>printBoard</var><b>: </b><span>Board → IO Unit</span></span></div></blockquote></div></small></div>printBoard</span><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>g</var><b>: </b><span>GameState</span></span></div></blockquote></div></small></div><span class="nv">g</span></span><span class="alectryon-token"><span class="bp">.</span></span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>board</var><b>: </b><span>GameState → Board</span></span></div></blockquote></div></small></div>board</span><span class="alectryon-token">
 
 </span></span><span class="alectryon-sentence"><input class="alectryon-toggle" id="states-lean-chk0" style="display: none" type="checkbox"><label class="alectryon-input" for="states-lean-chk0"><span class="alectryon-token"><span class="k">#eval</span></span></label><small class="alectryon-output"><div><div class="alectryon-messages"><blockquote class="alectryon-message">[X, O, X]
-[O, X, X]
 [X, O, O]
+[O, X, O]
 </blockquote></div></div></small></span><span class="alectryon-wsp"><span class="alectryon-token"> </span><span class="alectryon-token"><div class="alectryon-type-info-wrapper"><small class="alectryon-type-info"><div class="alectryon-goals"><blockquote class="alectryon-goal"><div class="goal-hyps"><span class="hyp-type"><var>main</var><b>: </b><span>IO Unit</span></span></div></blockquote></div></small></div>main</span><span class="alectryon-token">
 <span class="c1">-- [X, X, O]</span>
 <span class="c1">-- [X, O, O]</span>
@@ -6964,7 +6964,7 @@ operator bool() to coerce the expression into a Boolean. This produces
 counter-intuitive behavior, and may confuse developers.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="documentation"><a class="header" href="#documentation">Documentation</a></h1>
 <p>The Lean <code>doc</code> folder contains the <a href="https://leanprover.github.io/lean4/doc/">Lean Manual</a> and is
-authored in a combination of markdown (*.md) files and literate Lean files.  The .lean files are
+authored in a combination of markdown (<code>*.md</code>) files and literate Lean files.  The .lean files are
 preprocessed using a tool called <a href="https://github.com/leanprover/leanink">LeanInk</a> and
 <a href="https://github.com/Kha/alectryon">Alectryon</a> which produces a generated markdown file.  We then run
 <code>mdbook</code> on the result to generate the html pages.</p>
@@ -7006,28 +7006,29 @@ Then run the following:</p>
 </code></pre>
 </li>
 <li>
-<p>Clone https://github.com/leanprover/LeanInk.git and run <code>lake build</code> then copy the resulting
-executable to your <code>$HOME/.elan/bin</code> folder or <code>%USERPROFILE%\.elan\bin</code> so Alectryon can find it
-there.</p>
+<p>Clone https://github.com/leanprover/LeanInk.git and run <code>lake build</code> then make the resulting
+binary available to Alectryon using e.g.</p>
+<pre><code class="language-bash"># make `leanInk` available in the current shell
+export PATH=$PWD/build/bin:$PATH
+</code></pre>
 </li>
 <li>
 <p>Create a Python 3.10 environment.</p>
 </li>
 <li>
-<p>Install the following packages:</p>
+<p>Install Alectryon:</p>
 <pre><code>python3 -m pip install git+https://github.com/Kha/alectryon.git@typeid
 </code></pre>
 </li>
 <li>
-<p>Now you are ready to process the *.lean files using Alectryon as follows:</p>
+<p>Now you are ready to process the <code>*.lean</code> files using Alectryon as follows:</p>
 <pre><code>cd lean4/doc
-alectryon --frontend lean4+markup examples\palindromes.lean --backend webpage -o palindromes.lean.md
+alectryon --frontend lean4+markup examples/palindromes.lean --backend webpage -o palindromes.lean.md
 </code></pre>
+<p>Repeat this for the other .lean files you care about or write a script to process them all.</p>
 </li>
-</ol>
-<p>And repeat this for the other .lean files you care about or write a script to process them all.</p>
-<ol>
-<li>Now you can build the book using:
+<li>
+<p>Now you can build the book using:</p>
 <pre><code>cd lean4/doc
 mdbook build
 </code></pre>
