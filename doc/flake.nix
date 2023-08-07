@@ -4,15 +4,15 @@
   inputs.lean.url = path:../.;
   inputs.flake-utils.follows = "lean/flake-utils";
   inputs.mdBook = {
-    url = github:leanprover/mdBook;
+    url = "github:leanprover/mdBook";
     flake = false;
   };
   inputs.alectryon = {
-    url = github:Kha/alectryon/typeid;
+    url = "github:Kha/alectryon/typeid";
     flake = false;
   };
   inputs.leanInk = {
-    url = github:leanprover/LeanInk;
+    url = "github:leanprover/LeanInk";
     flake = false;
   };
 
@@ -27,7 +27,7 @@
         src = inputs.mdBook;
         cargoDeps = drv.cargoDeps.overrideAttrs (_: {
           inherit src;
-          outputHash = "sha256-mhTWHs/bsmm3FH59SkUxBTl5lEH2Rlz/aF9CuBTu1TE=";
+          outputHash = "sha256-1YlPS6cqgxE4fjy9G8pWrpP27YrrbCDnfeyIsX81ZNw=";
         });
         doCheck = false;
       });
@@ -78,22 +78,30 @@
           (with python3Packages; [ pygments dominate beautifulsoup4 docutils ]);
         doCheck = false;
       };
-      renderLean = name: file: runCommandNoCC "${name}.md" { buildInputs = [ alectryon ]; } ''
-        mkdir -p $(basename $out/${name})
-        alectryon --frontend lean4+markup ${file} --backend webpage -o $out/${name}.md
-      '';
-      listFilesRecursiveRel = root: dir: lib.flatten (lib.mapAttrsToList (name: type:
-        if type == "directory" then
-          listFilesRecursiveRel root ("${dir}/${name}")
-        else
-          dir + "/${name}"
-      ) (builtins.readDir "${root}/${dir}"));
-      renderDir = dir: let
-        inputs = builtins.filter (n: builtins.match ".*\.lean" n != null) (listFilesRecursiveRel dir ".");
-        outputs = lib.genAttrs inputs (n: renderLean n "${dir}/${n}");
-      in
-        outputs // symlinkJoin { inherit name; paths = lib.attrValues outputs; };
-      inked = renderDir ./.;
+      renderLeanMod = mod: mod.overrideAttrs (final: prev: {
+        name = "${prev.name}.md";
+        buildInputs = prev.buildInputs ++ [ alectryon ];
+        outputs = [ "out" ];
+        buildCommand = ''
+          dir=$(dirname $relpath)
+          mkdir -p $dir out/$dir
+          if [ -d $src ]; then cp -r $src/. $dir/; else cp $src $leanPath; fi
+          alectryon --frontend lean4+markup $leanPath --backend webpage -o $out/$leanPath.md
+        '';
+      });
+      renderPackage = pkg: symlinkJoin {
+        name = "${pkg.name}-mds";
+        paths = map renderLeanMod (lib.attrValues pkg.mods);
+      };
+      literate = buildLeanPackage {
+        name = "literate";
+        src = ./.;
+        roots = [
+          { mod = "examples"; glob = "submodules"; }
+          { mod = "monads"; glob = "submodules"; }
+        ];
+      };
+      inked = renderPackage literate;
       doc = book;
     };
     defaultPackage = self.packages.${system}.doc;
