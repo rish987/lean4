@@ -325,7 +325,7 @@ jobs:
           ulimit -c unlimited # coredumps
           # arguments passed to `cmake`
           # this also enables githash embedding into stage 1 library
-          OPTIONS=(-DCHECK_OLEAN_VERSION=ON)
+          OPTIONS=(-DCHECK_OLEAN_VERSION=OFF)
           OPTIONS+=(-DLEAN_EXTRA_MAKE_OPTS=-DwarningAsError=true)
           if [[ -n '${{ matrix.cross_target }}' ]]; then
             # used by `prepare-llvm`

@@ -23,6 +23,7 @@ extern "C" object* lean_environment_find(object*, object*);
 extern "C" uint32 lean_environment_trust_level(object*);
 extern "C" object* lean_environment_mark_quot_init(object*);
 extern "C" uint8 lean_environment_quot_init(object*);
+extern "C" uint8 lean_environment_get_proof_irrelevance(object*);
 extern "C" object* lean_register_extension(object*);
 extern "C" object* lean_get_extension(object*, object*);
 extern "C" object* lean_set_extension(object*, object*, object*);
@@ -51,6 +52,10 @@ unsigned environment::trust_lvl() const {
 
 bool environment::is_quot_initialized() const {
     return lean_environment_quot_init(to_obj_arg()) != 0;
+}
+
+bool environment::get_proof_irrelevance() const {
+    return lean_environment_get_proof_irrelevance(to_obj_arg());
 }
 
 void environment::mark_quot_initialized() {
