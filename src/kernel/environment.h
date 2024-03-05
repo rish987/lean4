@@ -61,6 +61,8 @@ public:
 
     bool is_quot_initialized() const;
 
+    bool get_proof_irrelevance() const;
+
     void set_main_module(name const & n);
 
     name get_main_module() const;

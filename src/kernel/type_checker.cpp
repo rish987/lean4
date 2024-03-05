@@ -1042,7 +1042,14 @@ bool type_checker::is_def_eq_core(expr const & t, expr const & s) {
     }
 
     r = is_def_eq_proof_irrel(t_n, s_n);
-    if (r != l_undef) return r == l_true;
+    if (r != l_undef && r == l_true) {
+      if (env().get_proof_irrelevance()) {
+        return true;
+      }
+      else {
+        fprintf(stderr, "WARNING: aborted proof irrelevance\n");
+      }
+    }
 
     r = lazy_delta_reduction(t_n, s_n);
     if (r != l_undef) return r == l_true;

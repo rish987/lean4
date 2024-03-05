@@ -54,11 +54,22 @@ def throwKernelException (ex : KernelException) : M Unit := do
     let state := { env := (← get).env }
     Prod.fst <$> (Lean.Core.CoreM.toIO · ctx state) do Lean.throwKernelException ex
 
+def getDeclString : Declaration → String
+  | .axiomDecl       val
+  | .defnDecl        val
+  | .thmDecl         val
+  | .opaqueDecl      val   => val.name.toString
+  | .quotDecl              => "(quotient)"
+  | .mutualDefnDecl  defns => s!"(mutual block) {(defns.map (·.name.toString))}"
+  | .inductDecl      lparams nparams types isUnsafe => s!"(inductive block) {(types.map (·.name.toString))}"
+
 /-- Add a declaration, possibly throwing a `KernelException`. -/
 def addDecl (d : Declaration) : M Unit := do
   match (← get).env.addDecl d with
   | .ok env => modify fun s => { s with env := env }
-  | .error ex => throwKernelException ex
+  | .error ex =>
+    IO.eprintln s!"error typechecking declaration: {getDeclString d}\n"
+    throwKernelException ex
 
 mutual
 /--

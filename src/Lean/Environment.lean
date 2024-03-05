@@ -150,6 +150,7 @@ structure Environment where
   When importing modules, we want to insert them at `const2ModIdx`.
   -/
   extraConstNames : NameSet
+  proofIrrelevance : Bool := true
   /-- The header contains additional information that is not updated often. -/
   header       : EnvironmentHeader := {}
   deriving Nonempty
@@ -187,6 +188,13 @@ def allImportedModuleNames (env : Environment) : Array Name :=
 @[export lean_environment_set_main_module]
 def setMainModule (env : Environment) (m : Name) : Environment :=
   { env with header := { env.header with mainModule := m } }
+
+def setProofIrrelevance (env : Environment) (p : Bool) : Environment :=
+  { env with proofIrrelevance := p }
+
+@[export lean_environment_get_proof_irrelevance]
+def getProofIrrelevance (env : Environment) : Bool :=
+  env.proofIrrelevance
 
 @[export lean_environment_main_module]
 def mainModule (env : Environment) : Name :=
