@@ -268,10 +268,15 @@ private def markQuotInit (env : Environment) : Environment :=
 private def isQuotInit (env : Environment) : Bool :=
   env.quotInit
 
-/-- Type check given declaration and add it to the environment -/
-@[extern "lean_add_decl"]
-opaque addDeclCore (env : Environment) (maxHeartbeats : USize) (decl : @& Declaration)
-  (cancelTk? : @& Option IO.CancelToken) : Except Exception Environment
+-- @[extern "lean_add_decl_new"]
+-- opaque addDeclCore' (env : Environment) (decl : @& Declaration) (check := true) :
+--     Except KernelException Environment
+
+-- /-- Type check given declaration and add it to the environment -/
+-- @[extern "lean_add_decl"]
+-- def addDeclCore (env : Environment) (maxHeartbeats : USize) (decl : @& Declaration)
+--   (cancelTk? : @& Option IO.CancelToken) : Except Exception Environment := 
+--   addDeclCore' env decl
 
 /--
 Add declaration to kernel without type checking it.
@@ -481,9 +486,14 @@ to ensure `findStateAsync` will be able to find the modification from other bran
 def asyncMayContain (env : Environment) (declName : Name) : Bool :=
   env.asyncCtx?.all (·.mayContain declName)
 
-@[extern "lean_elab_add_decl"]
-private opaque addDeclCheck (env : Environment) (maxHeartbeats : USize) (decl : @& Declaration)
-  (cancelTk? : @& Option IO.CancelToken) : Except Kernel.Exception Environment
+@[extern "lean_add_decl_new"]
+opaque addDeclCore' (env : Environment) (decl : Declaration) (check := true) :
+    Except KernelException Environment
+
+-- @[extern "lean_elab_add_decl"]
+private opaque addDeclCheck (env : Environment) (maxHeartbeats : USize) (decl : Declaration)
+  (cancelTk? : @& Option IO.CancelToken) : Except Kernel.Exception Environment :=
+  addDeclCore' env decl
 
 @[extern "lean_elab_add_decl_without_checking"]
 private opaque addDeclWithoutChecking (env : Environment) (decl : @& Declaration) :

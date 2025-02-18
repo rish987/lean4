@@ -37,13 +37,17 @@ Init:
 # Use `+` to use the Make jobserver with `leanmake` for parallelized builds
 # Build `.olean/.o`s of downstream libraries as well for better parallelism
 	+"${LEAN_BIN}/leanmake" objs lib lib.export PKG=Init $(LEANMAKE_OPTS) \
-	  EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean"
+		# EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean"
+		EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean Batteries Batteries.lean Lean4Lean Lean4Lean.lean"
+
 
 Std: Init
 	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Std $(LEANMAKE_OPTS)
 
 Lean: Std
 	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Lean $(LEANMAKE_OPTS)
+	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Batteries $(LEANMAKE_OPTS)
+	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Lean4Lean $(LEANMAKE_OPTS)
 
 ${LIB}/temp/empty.c:
 	touch $@
@@ -66,7 +70,7 @@ endif
 
 Init_shared: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libInit_shared${CMAKE_SHARED_LIBRARY_SUFFIX}
 
-${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libleanshared${CMAKE_SHARED_LIBRARY_SUFFIX}: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libInit_shared${CMAKE_SHARED_LIBRARY_SUFFIX} ${LIB}/temp/libLean.a.export ${LIB}/lean/libleancpp.a ${LIB}/temp/libleanshell.a ${LIB}/temp/libleaninitialize.a
+${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libleanshared${CMAKE_SHARED_LIBRARY_SUFFIX}: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libInit_shared${CMAKE_SHARED_LIBRARY_SUFFIX} ${LIB}/temp/libLean.a.export ${LIB}/lean/libleancpp.a ${LIB}/temp/libleanshell.a ${LIB}/temp/libleaninitialize.a ${LIB}/temp/libBatteries.a.export ${LIB}/temp/libLean4Lean.a.export
 	@echo "[    ] Building $@"
 ifeq "${CMAKE_SYSTEM_NAME}" "Windows"
 # on Windows, must remove file before writing a new one (since the old one may be in use)
@@ -93,7 +97,7 @@ ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
 	  ${LIB}/temp/Lean.o -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
 	"${CMAKE_BINARY_DIR}/leanc.sh" -shared -o $@ \
-	  -Wl,--whole-archive ${LIB}/temp/Lean.o ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lleancpp -Wl,--end-group ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+	  -Wl,--whole-archive ${LIB}/temp/Lean.o ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lBatteries -lLean4Lean -lleancpp -Wl,--end-group ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 endif
 endif
 

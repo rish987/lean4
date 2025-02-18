@@ -15,12 +15,12 @@ register_builtin_option debug.skipKernelTC : Bool := {
 }
 
 /-- Adds given declaration to the environment, respecting `debug.skipKernelTC`. -/
-def Kernel.Environment.addDecl (env : Environment) (opts : Options) (decl : Declaration)
-    (cancelTk? : Option IO.CancelToken := none) : Except Exception Environment :=
-  if debug.skipKernelTC.get opts then
-    addDeclWithoutChecking env decl
-  else
-    addDeclCore env (Core.getMaxHeartbeats opts).toUSize decl cancelTk?
+-- def Kernel.Environment.addDecl (env : Environment) (opts : Options) (decl : Declaration)
+--     (cancelTk? : Option IO.CancelToken := none) : Except Exception Environment :=
+--   if debug.skipKernelTC.get opts then
+--     addDeclWithoutChecking env decl
+--   else
+--     addDeclCore env (Core.getMaxHeartbeats opts).toUSize decl cancelTk?
 
 private def Environment.addDeclAux (env : Environment) (opts : Options) (decl : Declaration)
     (cancelTk? : Option IO.CancelToken := none) : Except Kernel.Exception Environment :=
