@@ -20,7 +20,7 @@ structure TypeChecker.State where
   failure : Std.HashSet (Expr × Expr) := {}
 
 structure TypeChecker.Context where
-  env : Environment
+  env : Kernel.Environment
   lctx : LocalContext := {}
   safety : DefinitionSafety := .safe
   lparams : List Name := []
@@ -29,13 +29,15 @@ namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| Except KernelException
 
-def M.run (env : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
+def M.run (env : Kernel.Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
     (x : M α) : Except KernelException α :=
   x { env, safety, lctx } |>.run' {}
 
-instance : MonadEnv M where
-  getEnv := return (← read).env
-  modifyEnv _ := pure ()
+-- instance : MonadEnv M where
+--   getEnv := return (← read).env
+--   modifyEnv _ := pure ()
+
+def getEnv : M Kernel.Environment := return (← read).env
 
 instance : MonadLCtx M where
   getLCtx := return (← read).lctx
@@ -281,7 +283,7 @@ def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let env ← getEnv
-  if env.toKernelEnv.quotInit then
+  if env.quotInit then
     if let some r ← quotReduceRec e whnf then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
@@ -353,21 +355,21 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
     else
       save e
 
-def isDelta (env : Environment) (e : Expr) : Option ConstantInfo := do
+def isDelta (env : Kernel.Environment) (e : Expr) : Option ConstantInfo := do
   if let .const c _ := e.getAppFn then
     if let some ci := env.find? c then
       if ci.hasValue then
         return ci
   none
 
-def unfoldDefinitionCore (env : Environment) (e : Expr) : Option Expr := do
+def unfoldDefinitionCore (env : Kernel.Environment) (e : Expr) : Option Expr := do
   if let .const _ ls := e then
     if let some d := isDelta env e then
       if ls.length == d.numLevelParams then
         return d.instantiateValueLevelParams! ls
   none
 
-def unfoldDefinition (env : Environment) (e : Expr) : Option Expr := do
+def unfoldDefinition (env : Kernel.Environment) (e : Expr) : Option Expr := do
   if e.isApp then
     let f0 := e.getAppFn
     if let some f := unfoldDefinitionCore env f0 then
@@ -377,7 +379,7 @@ def unfoldDefinition (env : Environment) (e : Expr) : Option Expr := do
   else
     unfoldDefinitionCore env e
 
-def reduceNative (_env : Environment) (e : Expr) : Except KernelException (Option Expr) := do
+def reduceNative (_env : Kernel.Environment) (e : Expr) : Except KernelException (Option Expr) := do
   let .app f (.const c _) := e | return none
   if f == .const ``reduceBool [] then
     throw <| .other s!"lean4lean does not support 'reduceBool {c}' reduction"
@@ -516,7 +518,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let env ← getEnv
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
-  unless isStructureLike env fInfo.induct do return false
+  unless isStructureLike' env fInfo.induct do return false
   unless ← isDefEq (← inferType t) (← inferType s) do return false
   let args := s.getAppArgs
   for h : i in [fInfo.numParams:args.size] do

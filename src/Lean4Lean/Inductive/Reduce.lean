@@ -4,7 +4,7 @@ import Lean4Lean.Expr
 namespace Lean
 
 section
-variable [Monad m] (env : Environment)
+variable [Monad m] (env : Kernel.Environment)
     (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool)
 
 def getFirstCtor (dName : Name) : Option Name := do
@@ -40,8 +40,18 @@ def expandEtaStruct (eType e : Expr) : Expr :=
     result := .app result (.proj I i e)
   pure result
 
+def isStructureLike' (env : Kernel.Environment) (constName : Name) : Bool :=
+  match env.find? constName with
+  | some (.inductInfo { isRec := false, ctors := [_], numIndices := 0, .. }) => true
+  | _ => false
+
+def isConstructorApp?' (env : Kernel.Environment) (e : Expr) : Option Name := do
+  let .const fn _ := e.getAppFn | none
+  let .ctorInfo _ ← env.find? fn | none
+  return fn
+
 def toCtorWhenStruct (inductName : Name) (e : Expr) : m Expr := do
-  if !isStructureLike env inductName || (e.isConstructorApp?' env).isSome then
+  if !isStructureLike' env inductName || (isConstructorApp?' env e).isSome then
     return e
   let eType ← whnf (← inferType e)
   if !eType.getAppFn.isConstOf inductName then return e
@@ -52,7 +62,7 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
   let .const fn _ := major.getAppFn | none
   rval.rules.find? (·.ctor == fn)
 
-def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
+def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
     (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) :
     m (Option Expr) := do
   let .const recFn ls := e.getAppFn | return none

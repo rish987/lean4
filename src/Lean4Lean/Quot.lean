@@ -5,11 +5,6 @@ import Lean4Lean.LocalContext
 
 namespace Lean
 
-open private updateBaseAfterKernelAdd from Lean.Environment
-
-instance : Coe Environment Kernel.Environment where
-  coe e := e.toKernelEnv
-
 open private add markQuotInit from Lean.Environment
 
 abbrev ExprBuildT (m) := ReaderT LocalContext <| ReaderT NameGenerator m
@@ -19,7 +14,7 @@ def ExprBuildT.run [Monad m] (x : ExprBuildT m α) : m α := x {} {}
 instance : MonadLocalNameGenerator (ExprBuildT m) where
   withFreshId x c ngen := x ngen.curr c ngen.next
 
-def checkEqType (env : Environment) : Except KernelException Unit := do
+def checkEqType (env : Kernel.Environment) : Except KernelException Unit := do
   let fail {α} (s : String) : Except KernelException α :=
     throw <| .other s!"failed to initialize quot module, {s}"
   let .inductInfo info ← env.get ``Eq | fail "environment does not have 'Eq' type"
@@ -37,8 +32,8 @@ def checkEqType (env : Environment) : Except KernelException Unit := do
         if info.type != ((← read).mkForall #[α, a] <| mkApp3 (.const ``Eq [.param u]) α a a) then
           fail "unexpected type for 'Eq' type constructor"
 
-def Environment.addQuot (env : Environment) : Except KernelException Environment := do
-  if env.toKernelEnv.quotInit then return env
+def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelException Kernel.Environment := do
+  if env.quotInit then return env
   checkEqType env
   ExprBuildT.run do
   let u := .param `u

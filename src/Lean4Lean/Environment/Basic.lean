@@ -1,11 +1,11 @@
 import Lean.Environment
 
-namespace Lean.Environment
+namespace Lean.Kernel.Environment
 
-def get (env : Environment) (n : Name) : Except KernelException ConstantInfo :=
+def get (env : Kernel.Environment) (n : Name) : Except KernelException ConstantInfo :=
   match env.find? n with
   | some ci => pure ci
-  | none => throw <| .unknownConstant env.toKernelEnv n
+  | none => throw <| .unknownConstant env n
 
 def checkDuplicatedUnivParams : List Name → Except KernelException Unit
   | [] => pure ()
@@ -15,15 +15,15 @@ def checkDuplicatedUnivParams : List Name → Except KernelException Unit
         s!"failed to add declaration to environment, duplicate universe level parameter: '{p}'"
     checkDuplicatedUnivParams ls
 
-def checkNoMVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoMVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   if e.hasMVar then
-    throw <| .declHasMVars env.toKernelEnv n e
+    throw <| .declHasMVars env n e
 
-def checkNoFVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   if e.hasFVar then
-    throw <| .declHasFVars env.toKernelEnv n e
+    throw <| .declHasFVars env n e
 
-def checkNoMVarNoFVar (env : Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoMVarNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
   checkNoMVar env n e
   checkNoFVar env n e
 
@@ -34,10 +34,10 @@ def primitives : NameSet := .ofList [
   ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
   ``String, ``String.mk]
 
-def checkName (env : Environment) (n : Name)
+def checkName (env : Kernel.Environment) (n : Name)
     (allowPrimitive := false) : Except KernelException Unit := do
-  if env.contains n then
-    throw <| .alreadyDeclared env.toKernelEnv n
+  if env.constants.contains n then
+    throw <| .alreadyDeclared env n
   unless allowPrimitive do
     if primitives.contains n then
       throw <| .other s!"unexpected use of primitive name {n}"
