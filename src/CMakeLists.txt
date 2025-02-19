@@ -404,7 +404,7 @@ if(NOT LEAN_STANDALONE)
 endif()
 
 # flags for user binaries = flags for toolchain binaries + Lake
-set(LEANC_STATIC_LINKER_FLAGS " ${TOOLCHAIN_STATIC_LINKER_FLAGS} -lLake")
+set(LEANC_STATIC_LINKER_FLAGS " ${TOOLCHAIN_STATIC_LINKER_FLAGS} -lLake -lLean4Lean -lBatteries")
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
   set(LEANC_SHARED_LINKER_FLAGS " ${TOOLCHAIN_SHARED_LINKER_FLAGS} -Wl,--as-needed -lLake_shared -Wl,--no-as-needed")
 else()

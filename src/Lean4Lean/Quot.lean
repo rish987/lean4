@@ -21,14 +21,14 @@ def checkEqType (env : Kernel.Environment) : Except KernelException Unit := do
   let [u] := info.levelParams | fail "unexpected number of universe params at 'Eq' type"
   let [eqRefl] := info.ctors | fail "unexpected number of constructors for 'Eq' type"
   ExprBuildT.run do
-    withLocalDecl `α (.sort (.param u)) .implicit fun α => do
+    LwithLocalDecl `α (.sort (.param u)) .implicit fun α => do
       if info.type != ((← read).mkForall #[α] <| .arrow α <| .arrow α .prop) then
         fail "'Eq' has an expected type"
     let info ← env.get eqRefl
     let [u] := info.levelParams
       | fail "unexpected number of universe params at 'Eq' type constructor"
-    withLocalDecl `α (.sort (.param u)) .implicit fun α => do
-      withLocalDecl `a α .default fun a => do
+    LwithLocalDecl `α (.sort (.param u)) .implicit fun α => do
+      LwithLocalDecl `a α .default fun a => do
         if info.type != ((← read).mkForall #[α, a] <| mkApp3 (.const ``Eq [.param u]) α a a) then
           fail "unexpected type for 'Eq' type constructor"
 
@@ -37,26 +37,26 @@ def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelExcepti
   checkEqType env
   ExprBuildT.run do
   let u := .param `u
-  withLocalDecl `α (.sort u) .implicit fun α => do
-  let env ← withLocalDecl `r (.arrow α (.arrow α .prop)) .default fun r => do
+  LwithLocalDecl `α (.sort u) .implicit fun α => do
+  let env ← LwithLocalDecl `r (.arrow α (.arrow α .prop)) .default fun r => do
     -- constant Quot.{u} {α : Sort u} (r : α → α → Prop) : Sort u
     let env := add env <| .quotInfo {
       name := ``Quot, kind := .type, levelParams := [`u]
       type := (← read).mkForall #[α, r] <| .sort u
     }
-    withLocalDecl `a α .default fun a => do
+    LwithLocalDecl `a α .default fun a => do
       -- constant Quot.mk.{u} {α : Sort u} (r : α → α → Prop) (a : α) : @Quot.{u} α r
       return add env <| .quotInfo {
         name := ``Quot.mk, kind := .ctor, levelParams := [`u]
         type := (← read).mkForall #[α, r, a] <| mkApp2 (.const ``Quot [u]) α r
       }
-  withLocalDecl `r (.arrow α (.arrow α .prop)) .implicit fun r => do
+  LwithLocalDecl `r (.arrow α (.arrow α .prop)) .implicit fun r => do
   let quot_r := mkApp2 (.const ``Quot [u]) α r
-  withLocalDecl `a α .default fun a => do
+  LwithLocalDecl `a α .default fun a => do
   let v := .param `v
-  let env ← withLocalDecl `β (.sort v) .implicit fun β => do
-    withLocalDecl `f (.arrow α β) .default fun f => do
-    withLocalDecl `b α .default fun b => do
+  let env ← LwithLocalDecl `β (.sort v) .implicit fun β => do
+    LwithLocalDecl `f (.arrow α β) .default fun f => do
+    LwithLocalDecl `b α .default fun b => do
     let rab := mkApp2 r a b
     let fa_eq_fb := mkApp3 (.const ``Eq [v]) β (.app f a) (.app f b)
     let sanity := (← read).mkForall #[a, b] <| .arrow rab fa_eq_fb
@@ -67,9 +67,9 @@ def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelExcepti
       type := (← read).mkForall #[α, r, β, f] <| .arrow sanity <| .arrow quot_r β
     }
   let quotMk_a := mkApp3 (.const ``Quot.mk [u]) α r a
-  withLocalDecl `β (.arrow quot_r .prop) .implicit fun β => do
+  LwithLocalDecl `β (.arrow quot_r .prop) .implicit fun β => do
   let all_quot := (← read).mkForall #[a] <| .app β quotMk_a
-  withLocalDecl `q quot_r .implicit fun q => do
+  LwithLocalDecl `q quot_r .implicit fun q => do
   -- constant Quot.ind.{u} {α : Sort u} {r : α → α → Prop} {β : @Quot.{u} α r → Prop} :
   --   (∀ a : α, β (@Quot.mk.{u} α r a)) → ∀ q : @Quot.{u} α r, β q */
   let env := add env <| .quotInfo {

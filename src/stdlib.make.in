@@ -33,12 +33,11 @@ endif
 
 # These can be phony since the inner Makefile will have the correct dependencies and avoid rebuilds
 Init:
-	@mkdir -p "${LIB}/lean/Lean" "${LIB}/lean/Lake" "${LIB}/lean/Std"
+	@mkdir -p "${LIB}/lean/Lean" "${LIB}/lean/Lean4Lean" "${LIB}/lean/Batteries" "${LIB}/lean/Lake" "${LIB}/lean/Std"
 # Use `+` to use the Make jobserver with `leanmake` for parallelized builds
 # Build `.olean/.o`s of downstream libraries as well for better parallelism
 	+"${LEAN_BIN}/leanmake" objs lib lib.export PKG=Init $(LEANMAKE_OPTS) \
-		# EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean"
-		EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean Batteries Batteries.lean Lean4Lean Lean4Lean.lean"
+		EXTRA_SRC_ROOTS="Std Std.lean Batteries Batteries.lean Lean4Lean Lean4Lean.lean Lean Lean.lean"
 
 
 Std: Init
