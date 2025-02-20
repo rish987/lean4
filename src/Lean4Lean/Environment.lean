@@ -107,7 +107,6 @@ open private updateBaseAfterKernelAdd from Lean.Environment
 @[export lean_add_decl_new]
 def addDecl' (env' : Environment) (decl : Declaration) (check := true) :
     EIO KernelException Environment := do
-  dbg_trace s!"DBG[211]: Environment.lean:108: decl={decl.getNames}"
   let env := env'.toKernelEnv
   let newEnv ← match decl with
   | .axiomDecl v =>

@@ -662,10 +662,10 @@ def isDefEqUnitLike (T : Expr) : RecM Bool := do
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
   return true
 
-def toKernelException (m : EIO Exception α) : EIO Kernel.Exception α := fun x =>
+def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
   match m x with
-  | .ok s I => .ok s I
-  | .error _ I => .error (.other "untranslated error") I
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
 
 open Lean.Meta in
 def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
@@ -683,7 +683,7 @@ def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     if r != .undef then return r == .true
 
   let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
-  let ((reqs, _), _) ← toKernelException (Lean.Meta.MetaM.run (do
+  let check := (Lean.Meta.MetaM.run (do
       let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
       let lem := `prfIrrel
       if (← getEnv).contains lem then
@@ -692,19 +692,33 @@ def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
           let gsExprs ← gs.mapM fun g => do
             let d ← g.getDecl
             pure d.type
-          
-          dbg_trace s!"DBG[212]: TypeChecker.lean:695 {(← Lean.getExprMVarAssignment? eqMvar.mvarId!)}"
           pure $ .some gsExprs
         catch _ =>
           pure none
       else
         pure none
-    ) {lctx := (← readThe Context).lctx} |>.run {fileName := default, fileMap := default} {env := (← readThe Context).env'})
-  if let some rs := reqs then
-    dbg_trace s!"DBG[210]: TypeChecker.lean:701 (after if let some rs := reqs then)"
-    if rs.length == 0 then return true
+    ) {lctx := (← readThe Context).lctx} |>.run {fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+  let reqs ← match ← toKernelException check with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
 
-  let r ← isDefEqProofIrrel T
+  if let some rs := reqs then
+    if rs.length == 0 then return true
+    else
+      let mut allDefEq := true
+      for r in rs do
+        let args := r.getAppArgs
+        let .const `Eq [l'] := r.getAppFn | throw $ .other "invalid form for prerequesite lemma of extensional rule"
+        let T' := args[0]!
+        let t' := args[1]!
+        let s' := args[2]!
+        if not (← isDefEq t' s' l' T') then
+          allDefEq := false
+          break
+      if allDefEq then
+        return true
+
   if r != .undef then
     for lem in (Lean.Meta.DfEq.dfEqExt.getState ((← readThe Context).env')) do
       dbg_trace s!"DBG[205]: TypeChecker.lean:545 {lem}"
