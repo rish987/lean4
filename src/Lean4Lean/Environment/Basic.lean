@@ -2,12 +2,12 @@ import Lean.Environment
 
 namespace Lean.Kernel.Environment
 
-def get (env : Kernel.Environment) (n : Name) : Except KernelException ConstantInfo :=
+def get (env : Kernel.Environment) (n : Name) : EIO KernelException ConstantInfo :=
   match env.find? n with
   | some ci => pure ci
   | none => throw <| .unknownConstant env n
 
-def checkDuplicatedUnivParams : List Name → Except KernelException Unit
+def checkDuplicatedUnivParams : List Name → EIO KernelException Unit
   | [] => pure ()
   | p :: ls => do
     if p ∈ ls then
@@ -15,15 +15,15 @@ def checkDuplicatedUnivParams : List Name → Except KernelException Unit
         s!"failed to add declaration to environment, duplicate universe level parameter: '{p}'"
     checkDuplicatedUnivParams ls
 
-def checkNoMVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoMVar (env : Kernel.Environment) (n : Name) (e : Expr) : EIO KernelException Unit := do
   if e.hasMVar then
     throw <| .declHasMVars env n e
 
-def checkNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : EIO KernelException Unit := do
   if e.hasFVar then
     throw <| .declHasFVars env n e
 
-def checkNoMVarNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : Except KernelException Unit := do
+def checkNoMVarNoFVar (env : Kernel.Environment) (n : Name) (e : Expr) : EIO KernelException Unit := do
   checkNoMVar env n e
   checkNoFVar env n e
 
@@ -35,7 +35,7 @@ def primitives : NameSet := .ofList [
   ``String, ``String.mk]
 
 def checkName (env : Kernel.Environment) (n : Name)
-    (allowPrimitive := false) : Except KernelException Unit := do
+    (allowPrimitive := false) : EIO KernelException Unit := do
   if env.constants.contains n then
     throw <| .alreadyDeclared env n
   unless allowPrimitive do

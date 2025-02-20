@@ -29,17 +29,17 @@ structure TypeChecker.Context where
 
 namespace TypeChecker
 
-abbrev M := ReaderT Context <| StateT State <| Except KernelException
+abbrev M := ReaderT Context <| StateT State <| EIO KernelException
 
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
-    (x : M α) : Except KernelException α :=
+    (x : M α) : EIO KernelException α :=
   x { env, env', safety, lctx } |>.run' {}
 
 -- instance : MonadEnv M where
 --   getEnv := return (← read).env
 --   modifyEnv _ := pure ()
 
-def getEnv : M Kernel.Environment := return (← read).env
+def getKEnv : M Kernel.Environment := return (← read).env
 
 instance : MonadLCtx M where
   getLCtx := return (← read).lctx
@@ -75,25 +75,25 @@ def ensureSortCore (e s : Expr) : RecM Expr := do
   if e.isSort then return e
   let e ← whnf e
   if e.isSort then return e
-  throw <| .typeExpected (← getEnv) (← getLCtx) s
+  throw <| .typeExpected (← getKEnv) (← getLCtx) s
 
 def ensureForallCore (e s : Expr) : RecM Expr := do
   if e.isForall then return e
   let e ← whnf e
   if e.isForall then return e
-  throw <| .funExpected (← getEnv) (← getLCtx) s
+  throw <| .funExpected (← getKEnv) (← getLCtx) s
 
-def checkLevel (tc : Context) (l : Level) : Except KernelException Unit := do
+def checkLevel (tc : Context) (l : Level) : EIO KernelException Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
     throw <| .other s!"invalid reference to undefined universe level parameter '{n2}'"
 
-def inferFVar (tc : Context) (name : FVarId) : Except KernelException Expr := do
+def inferFVar (tc : Context) (name : FVarId) : EIO KernelException Expr := do
   if let some decl := tc.lctx.find? name then
     return decl.type
   throw <| .other "unknown free variable"
 
 def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bool) :
-    Except KernelException Expr := do
+    EIO KernelException Expr := do
   let e := Expr.const name ls
   let info ← tc.env.get name
   let ps := info.levelParams
@@ -191,7 +191,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
         let .sort l ← ensureSortCore typeType type | unreachable!
         let valType ← inferType val inferOnly
         if !(← isDefEq valType type (.succ l) typeType) then
-          throw <| .letTypeMismatch (← getEnv) (← getLCtx) name valType type
+          throw <| .letTypeMismatch (← getKEnv) (← getLCtx) name valType type
       loop fvars vals body
   | e => do
     let r ← inferType (e.instantiateRev fvars) inferOnly
@@ -218,7 +218,7 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   let e := Expr.proj typeName idx struct
   let type ← whnf structType
   type.withApp fun I args => do
-  let env ← getEnv
+  let env ← getKEnv
   let fail {_} := do throw <| .invalidProj env (← getLCtx) e
   let .const I_name I_levels := I | fail
   if typeName != I_name then fail
@@ -282,7 +282,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
         if !(← isDefEqCheckTypes dType aType) then
-          throw <| .appTypeMismatch (← getEnv) (← getLCtx) e fType aType
+          throw <| .appTypeMismatch (← getKEnv) (← getLCtx) e fType aType
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
   modify fun s => cond inferOnly
@@ -294,7 +294,7 @@ def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   fun m => m.whnfCore e cheapRec cheapProj
 
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let env ← getEnv
+  let env ← getKEnv
   if env.quotInit then
     if let some r ← quotReduceRec e whnf then
       return r
@@ -314,7 +314,7 @@ def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (O
     c := .strLitToConstructor s
   c.withApp fun mk args => do
   let .const mkC _ := mk | return none
-  let env ← getEnv
+  let env ← getKEnv
   let .ctorInfo mkInfo ← env.get mkC | return none
   return args[mkInfo.numParams + idx]?
 
@@ -391,7 +391,7 @@ def unfoldDefinition (env : Kernel.Environment) (e : Expr) : Option Expr := do
   else
     unfoldDefinitionCore env e
 
-def reduceNative (_env : Kernel.Environment) (e : Expr) : Except KernelException (Option Expr) := do
+def reduceNative (_env : Kernel.Environment) (e : Expr) : EIO KernelException (Option Expr) := do
   let .app f (.const c _) := e | return none
   if f == .const ``reduceBool [] then
     throw <| .other s!"lean4lean does not support 'reduceBool {c}' reduction"
@@ -447,7 +447,7 @@ def whnf' (e : Expr) : RecM Expr := do
   let rec loop t
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
-    let env ← getEnv
+    let env ← getKEnv
     let t ← whnfCore' t
     if let some t ← reduceNative env t then return t
     if let some t ← reduceNat t then return t
@@ -526,7 +526,7 @@ def tryEtaExpansion (t s : Expr) (l : Level) (T : Expr) : RecM Bool :=
 
 def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let .const f _ := s.getAppFn | return false
-  let env ← getEnv
+  let env ← getKEnv
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
   unless isStructureLike' env fInfo.induct do return false
@@ -571,7 +571,7 @@ def tryUnfoldProjApp (e : Expr) : RecM (Option Expr) := do
   return if e' != e then e' else none
 
 def lazyDeltaReductionStep (tn sn : Expr) (l : Level) (T : Expr) : RecM ReductionStatus := do
-  let env ← getEnv
+  let env ← getKEnv
   let delta e := whnfCore (unfoldDefinition env e).get! (cheapProj := true)
   let cont tn sn :=
     return match ← quickIsDefEq tn sn l T with
@@ -633,7 +633,7 @@ def lazyDeltaReduction (tn sn : Expr) (l : Level) (T : Expr) : RecM ReductionSta
         return .bool (← isDefEqCore tn' sn l T)
       else if let some sn' ← reduceNat sn then
         return .bool (← isDefEqCore tn sn' l T)
-    let env ← getEnv
+    let env ← getKEnv
     if let some tn' ← reduceNative env tn then
       return .bool (← isDefEqCore tn' sn l T)
     else if let some sn' ← reduceNative env sn then
@@ -656,12 +656,18 @@ def tryStringLitExpansion (t s : Expr) : RecM LBool := do
 def isDefEqUnitLike (T : Expr) : RecM Bool := do
   let tType ← whnf T
   let .const I _ := tType.getAppFn | return false
-  let env ← getEnv
+  let env ← getKEnv
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return false
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
   return true
 
+-- def toKernelException (m : EIO Exception α) : EIO Kernel.Exception α := fun x =>
+--   match m x with
+--   | .ok s I => .ok s I
+--   | .error _ I => .error (.other "untranslated error") I
+--
+-- open Lean.Meta in
 def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s l T (useHash := true)
   if r != .undef then return r == .true
@@ -675,6 +681,25 @@ def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
+
+  -- let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
+  -- let ((reqs, _), _) ← toKernelException (Lean.Meta.MetaM.run (do
+  --     let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
+  --     let lem := `prfIrrel
+  --     if (← getEnv).contains lem then
+  --       try
+  --         let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
+  --         let gsExprs ← gs.mapM fun g => do
+  --           let d ← g.getDecl
+  --           pure d.type
+  --         pure $ .some gsExprs
+  --       catch _ =>
+  --         pure none
+  --     else
+  --       pure none
+  --   ) {lctx := (← readThe Context).lctx} |>.run {fileName := default, fileMap := default} {env := (← readThe Context).env'})
+  -- if let some rs := reqs then
+  --   if rs.length == 0 then return true
 
   let r ← isDefEqProofIrrel T
   if r != .undef then

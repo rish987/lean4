@@ -14,8 +14,8 @@ def ExprBuildT.run [Monad m] (x : ExprBuildT m α) : m α := x {} {}
 instance : MonadLocalNameGenerator (ExprBuildT m) where
   withFreshId x c ngen := x ngen.curr c ngen.next
 
-def checkEqType (env : Kernel.Environment) : Except KernelException Unit := do
-  let fail {α} (s : String) : Except KernelException α :=
+def checkEqType (env : Kernel.Environment) : EIO KernelException Unit := do
+  let fail {α} (s : String) : EIO KernelException α :=
     throw <| .other s!"failed to initialize quot module, {s}"
   let .inductInfo info ← env.get ``Eq | fail "environment does not have 'Eq' type"
   let [u] := info.levelParams | fail "unexpected number of universe params at 'Eq' type"
@@ -32,7 +32,7 @@ def checkEqType (env : Kernel.Environment) : Except KernelException Unit := do
         if info.type != ((← read).mkForall #[α, a] <| mkApp3 (.const ``Eq [.param u]) α a a) then
           fail "unexpected type for 'Eq' type constructor"
 
-def Kernel.Environment.addQuot (env : Kernel.Environment) : Except KernelException Kernel.Environment := do
+def Kernel.Environment.addQuot (env : Kernel.Environment) : EIO KernelException Kernel.Environment := do
   if env.quotInit then return env
   checkEqType env
   ExprBuildT.run do

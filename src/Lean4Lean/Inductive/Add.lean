@@ -33,7 +33,7 @@ structure Context where
   safety : DefinitionSafety
   allowPrimitive : Bool
 
-abbrev M := ReaderT Context <| Except KernelException
+abbrev M := ReaderT Context <| EIO KernelException
 
 instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
@@ -195,7 +195,7 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
 
 def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
-  let env ← TypeChecker.getEnv
+  let env ← TypeChecker.getKEnv
   for h : idx in [:indTypes.size] do
     let indType := indTypes[idx]
     let mut foundCtors : NameSet := {}
@@ -466,7 +466,7 @@ def run (lparams : List Name) (nparams : Nat) (types : List InductiveType)
   let k ← isKTarget stats indTypes
   let isUnsafe := (← read).safety != .safe
   StateT.run' (s := 0) do
-  let mut env ← TypeChecker.getEnv
+  let mut env ← TypeChecker.getKEnv
   for h : dIdx in [:indTypes.size] do
     let indType := indTypes[dIdx]
     let info := recInfos[dIdx]!
@@ -558,7 +558,7 @@ structure State where
   nextIdx : Nat := 1
   deriving Inhabited
 
-abbrev M := ReaderT Kernel.Environment <| StateT State <| Except KernelException
+abbrev M := ReaderT Kernel.Environment <| StateT State <| EIO KernelException
 
 instance : MonadNameGenerator M where
   getNGen := return (← get).ngen
@@ -611,7 +611,7 @@ def isNestedInductiveApp? (e : Expr) : M (Option InductiveVal) := do
   return some ci
 
 def instantiateForallParams (e : Expr) (hi : Nat) (params : Array Expr) :
-    Except KernelException Expr := do
+    EIO KernelException Expr := do
   let mut e := e
   for _ in [:hi] do
     let .forallE _ _ body _ := e | throw illFormed
@@ -718,7 +718,7 @@ def mkAuxRecNameMap (env' : Kernel.Environment) (types : List InductiveType) :
 
 def Kernel.Environment.addInductive (env : Kernel.Environment) (env' : Lean.Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool) :
-    Except KernelException Kernel.Environment := do
+    EIO KernelException Kernel.Environment := do
   let res ← ElimNestedInductive.run nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size
