@@ -299,6 +299,8 @@ Lean by `rfl`, because both sides are the same up to definitional equality.
 /-- `id x = x`, as a `@[simp]` lemma. -/
 @[simp] theorem id_eq (a : α) : Eq (id a) a := rfl
 
+axiom prfIrrel (P : Prop) (p q : P) : Eq p q
+
 /--
 The substitution principle for equality. If `a = b ` and `P a` holds,
 then `P b` also holds. We conventionally use the name `motive` for `P` here,

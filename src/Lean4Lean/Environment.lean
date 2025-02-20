@@ -16,10 +16,12 @@ def checkConstantVal (env : Kernel.Environment) (v : ConstantVal) (allowPrimitiv
   let sort ← TypeChecker.check v.type v.levelParams
   _ ← ensureSort sort v.type
 
+variable (env' : Lean.Environment)
+
 def addAxiom (env : Kernel.Environment) (v : AxiomVal) (check := true) :
     Except KernelException Kernel.Environment := do
   if check then
-    _ ← (checkConstantVal env v.toConstantVal).run env
+    _ ← (checkConstantVal env v.toConstantVal).run env env'
       (safety := if v.isUnsafe then .unsafe else .safe)
   return (add env (.axiomInfo v))
 
@@ -29,22 +31,22 @@ def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true)
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
     if check then
-      _ ← (checkConstantVal env v.toConstantVal).run env (safety := .unsafe)
-    let env' := add env (.defnInfo v)
+      _ ← (checkConstantVal env v.toConstantVal).run env env' (safety := .unsafe)
+    let newEnv := add env (.defnInfo v)
     if check then
-      checkNoMVarNoFVar env' v.name v.value
-      M.run env' (safety := .unsafe) (lctx := {}) do
+      checkNoMVarNoFVar newEnv v.name v.value
+      M.run newEnv env' (safety := .unsafe) (lctx := {}) do
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEq valType v.type) then
-          throw <| .declTypeMismatch env' (.defnDecl v) valType
-    return env'
+        if !(← TypeChecker.isDefEqCheckTypes valType v.type) then
+          throw <| .declTypeMismatch newEnv (.defnDecl v) valType
+    return newEnv
   else
     if check then
-      M.run env (safety := .safe) (lctx := {}) do
+      M.run env env' (safety := .safe) (lctx := {}) do
         checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
         checkNoMVarNoFVar env v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEq valType v.type) then
+        if !(← TypeChecker.isDefEqCheckTypes valType v.type) then
           throw <| .declTypeMismatch env (.defnDecl v) valType
     return add env (.defnInfo v)
 
@@ -52,23 +54,23 @@ def addTheorem (env : Kernel.Environment) (v : TheoremVal) (check := true) :
     Except KernelException Kernel.Environment := do
   if check then
     -- TODO(Leo): we must add support for handling tasks here
-    M.run env (safety := .safe) (lctx := {}) do
+    M.run env env' (safety := .safe) (lctx := {}) do
       if !(← isProp v.type) then
         throw <| .thmTypeIsNotProp env v.name v.type
       checkConstantVal env v.toConstantVal
       checkNoMVarNoFVar env v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← TypeChecker.isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEqCheckTypes valType v.type) then
         throw <| .declTypeMismatch env (.thmDecl v) valType
   return add env (.thmInfo v)
 
 def addOpaque (env : Kernel.Environment) (v : OpaqueVal) (check := true) :
     Except KernelException Kernel.Environment := do
   if check then
-    M.run env (safety := .safe) (lctx := {}) do
+    M.run env env' (safety := .safe) (lctx := {}) do
       checkConstantVal env v.toConstantVal
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← TypeChecker.isDefEq valType v.type) then
+      if !(← TypeChecker.isDefEqCheckTypes valType v.type) then
         throw <| .declTypeMismatch env (.opaqueDecl v) valType
   return add env (.opaqueInfo v)
 
@@ -78,23 +80,23 @@ def addMutual (env : Kernel.Environment) (vs : List DefinitionVal) (check := tru
   if let .safe := v₀.safety then
     throw <| .other "invalid mutual definition, declaration is not tagged as unsafe/partial"
   if check then
-    M.run env (safety := v₀.safety) (lctx := {}) do
+    M.run env env' (safety := v₀.safety) (lctx := {}) do
       for v in vs do
         if v.safety != v₀.safety then
           throw <| .other
             "invalid mutual definition, declarations must have the same safety annotation"
         checkConstantVal env v.toConstantVal
-  let mut env' := env
+  let mut newEnv := env
   for v in vs do
-    env' := add env' (.defnInfo v)
+    newEnv := add newEnv (.defnInfo v)
   if check then
-    M.run env' (safety := v₀.safety) (lctx := {}) do
+    M.run newEnv env' (safety := v₀.safety) (lctx := {}) do
       for v in vs do
-        checkNoMVarNoFVar env' v.name v.value
+        checkNoMVarNoFVar newEnv v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEq valType v.type) then
-          throw <| .declTypeMismatch env' (.mutualDefnDecl vs) valType
-  return env'
+        if !(← TypeChecker.isDefEqCheckTypes valType v.type) then
+          throw <| .declTypeMismatch newEnv (.mutualDefnDecl vs) valType
+  return newEnv
 end Kernel.Environment
 
 namespace Environment
@@ -108,18 +110,18 @@ def addDecl' (env' : Environment) (decl : Declaration) (check := true) :
   let env := env'.toKernelEnv
   let newEnv ← match decl with
   | .axiomDecl v =>
-    env.addAxiom v check
+    env.addAxiom env' v check
   | .defnDecl v =>
-    env.addDefinition v check
+    env.addDefinition env' v check
   | .thmDecl v =>
-    env.addTheorem v check
+    env.addTheorem env' v check
   | .opaqueDecl v =>
-    env.addOpaque v check
+    env.addOpaque env' v check
   | .mutualDefnDecl v =>
-    env.addMutual v check
+    env.addMutual env' v check
   | .quotDecl =>
     env.addQuot
   | .inductDecl lparams nparams types isUnsafe =>
-    let allowPrimitive ← env.checkPrimitiveInductive lparams nparams types isUnsafe
-    env.addInductive lparams nparams types isUnsafe allowPrimitive
+    let allowPrimitive ← env.checkPrimitiveInductive env' lparams nparams types isUnsafe
+    env.addInductive env' lparams nparams types isUnsafe allowPrimitive
   return updateBaseAfterKernelAdd env' newEnv

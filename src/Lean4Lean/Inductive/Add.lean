@@ -27,6 +27,7 @@ structure InductiveStats where
 
 structure Context where
   env : Kernel.Environment
+  env' : Lean.Environment
   lctx : LocalContext := {}
   ngen : NameGenerator := { namePrefix := `_ind_fresh }
   safety : DefinitionSafety
@@ -38,7 +39,7 @@ instance : MonadLocalNameGenerator M where
   withFreshId f c := f c.ngen.curr { c with ngen := c.ngen.next }
 
 instance (priority := low) : MonadLift TypeChecker.M M where
-  monadLift x c := x.run c.env c.safety c.lctx
+  monadLift x c := x.run c.env c.env' c.safety c.lctx
 
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
@@ -78,7 +79,7 @@ def checkInductiveTypes
                 loop stats (← whnf type) (i + 1) nindices fuel k
             else
               let param := stats.params[i]!
-              unless ← isDefEq dom (← getType param) do
+              unless ← isDefEqCheckTypes dom (← getType param) do
                 throw <| .other "parameters of all inductive datatypes must match"
               let type := body.instantiate1 param
               loop stats (← whnf type) (i + 1) nindices fuel k
@@ -212,7 +213,7 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
       | fuel+1 => do
         if let .forallE name dom body bi := t then
           if let some param := stats.params[i]? then
-            unless ← isDefEq dom (← getType param) do
+            unless ← isDefEqCheckTypes dom (← getType param) do
               throw <| .other
                 s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
             loop (body.instantiate1 param) (i + 1) fuel
@@ -715,14 +716,14 @@ def mkAuxRecNameMap (env' : Kernel.Environment) (types : List InductiveType) :
     oldRecNames := oldRecNames.push oldRecName
   return (oldRecNames.toList, recMap)
 
-def Kernel.Environment.addInductive (env : Kernel.Environment) (lparams : List Name) (nparams : Nat)
+def Kernel.Environment.addInductive (env : Kernel.Environment) (env' : Lean.Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool) :
     Except KernelException Kernel.Environment := do
   let res ← ElimNestedInductive.run nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size
   let env' ← AddInductive.run lparams nparams res.types numNested
-    { env, allowPrimitive, safety := if isUnsafe then .unsafe else .safe }
+    { env, env', allowPrimitive, safety := if isUnsafe then .unsafe else .safe }
   if numNested = 0 then return env'
   let allIndNames := types.map (·.name)
   let (recNames', recNameMap') := mkAuxRecNameMap env' types

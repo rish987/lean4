@@ -21,13 +21,13 @@ open Lean Meta
 
 -- /-- Environment extensions for `refl` lemmas -/
 initialize dfEqExt :
-    SimpleScopedEnvExtension (Name × Array DiscrTree.Key) (DiscrTree Name) ←
+    SimpleScopedEnvExtension Name (List Name) ←
   registerSimpleScopedEnvExtension {
-    addEntry := fun dt (n, ks) => dt.insertCore ks n
+    addEntry := fun dt n => dt.insert n
     initial := {}
   }
 
-initialize registerBuiltinAttribute {
+builtin_initialize registerBuiltinAttribute {
   name := `dfeq
   descr := "definitional equality"
   add := fun decl _ kind => MetaM.run' do
@@ -38,8 +38,7 @@ initialize registerBuiltinAttribute {
     let .app (.app rel lhs) rhs := targetTy | fail
     let .app (.const ``Eq [_]) _ := rel | fail
     -- unless ← withNewMCtxDepth <| isDefEq lhs rhs do fail
-    let key ← DiscrTree.mkPath rel
-    dfEqExt.add (decl, key) kind
+    dfEqExt.add decl kind
 }
 
 end Lean.Meta.DfEq
