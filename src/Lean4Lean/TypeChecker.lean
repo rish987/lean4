@@ -662,12 +662,12 @@ def isDefEqUnitLike (T : Expr) : RecM Bool := do
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
   return true
 
--- def toKernelException (m : EIO Exception α) : EIO Kernel.Exception α := fun x =>
---   match m x with
---   | .ok s I => .ok s I
---   | .error _ I => .error (.other "untranslated error") I
---
--- open Lean.Meta in
+def toKernelException (m : EIO Exception α) : EIO Kernel.Exception α := fun x =>
+  match m x with
+  | .ok s I => .ok s I
+  | .error _ I => .error (.other "untranslated error") I
+
+open Lean.Meta in
 def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s l T (useHash := true)
   if r != .undef then return r == .true
@@ -682,24 +682,27 @@ def isDefEqCore' (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
 
-  -- let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
-  -- let ((reqs, _), _) ← toKernelException (Lean.Meta.MetaM.run (do
-  --     let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
-  --     let lem := `prfIrrel
-  --     if (← getEnv).contains lem then
-  --       try
-  --         let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
-  --         let gsExprs ← gs.mapM fun g => do
-  --           let d ← g.getDecl
-  --           pure d.type
-  --         pure $ .some gsExprs
-  --       catch _ =>
-  --         pure none
-  --     else
-  --       pure none
-  --   ) {lctx := (← readThe Context).lctx} |>.run {fileName := default, fileMap := default} {env := (← readThe Context).env'})
-  -- if let some rs := reqs then
-  --   if rs.length == 0 then return true
+  let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
+  let ((reqs, _), _) ← toKernelException (Lean.Meta.MetaM.run (do
+      let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
+      let lem := `prfIrrel
+      if (← getEnv).contains lem then
+        try
+          let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
+          let gsExprs ← gs.mapM fun g => do
+            let d ← g.getDecl
+            pure d.type
+          
+          dbg_trace s!"DBG[212]: TypeChecker.lean:695 {(← Lean.getExprMVarAssignment? eqMvar.mvarId!)}"
+          pure $ .some gsExprs
+        catch _ =>
+          pure none
+      else
+        pure none
+    ) {lctx := (← readThe Context).lctx} |>.run {fileName := default, fileMap := default} {env := (← readThe Context).env'})
+  if let some rs := reqs then
+    dbg_trace s!"DBG[210]: TypeChecker.lean:701 (after if let some rs := reqs then)"
+    if rs.length == 0 then return true
 
   let r ← isDefEqProofIrrel T
   if r != .undef then

@@ -53,11 +53,22 @@ def isTodo (name : Name) : M Bool := do
 def throwKernelException (ex : Kernel.Exception) : M Unit := do
   throw <| .userError <| (← ex.toMessageData {} |>.toString)
 
+-- def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Error (Sum α Kernel.Exception) := fun x =>
+--   match m x with
+--   | .ok s I => .ok (.inl s) I
+--   | .error e I => .ok (.inr e) I
+
+def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Unit (Sum α Kernel.Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
+
 /-- Add a declaration, possibly throwing a `Kernel.Exception`. -/
 def addDecl (d : Declaration) : M Unit := do
-  match (← get).env.addDeclCore 0 d (cancelTk? := none) with
-  | .ok env => modify fun s => { s with env := env }
-  | .error ex => throwKernelException ex
+  let getEnv := EIO.toIO (fun _ => .userError <| "impossible") $ ofKernelExceptionEIO $ (← get).env.addDeclCore 0 d (cancelTk? := none)
+  match ← getEnv with
+    | .inl env => modify fun s => { s with env := env }
+    | .inr e => throwKernelException e
 
 mutual
 /--

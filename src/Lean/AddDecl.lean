@@ -23,12 +23,12 @@ register_builtin_option debug.skipKernelTC : Bool := {
 --     addDeclCore env (Core.getMaxHeartbeats opts).toUSize decl cancelTk?
 
 private def Environment.addDeclAux (env : Environment) (opts : Options) (decl : Declaration)
-    (cancelTk? : Option IO.CancelToken := none) : Except Kernel.Exception Environment :=
+    (cancelTk? : Option IO.CancelToken := none) : EIO Kernel.Exception Environment :=
   env.addDeclCore (Core.getMaxHeartbeats opts).toUSize decl cancelTk? (!debug.skipKernelTC.get opts)
 
 @[deprecated "use `Lean.addDecl` instead to ensure new namespaces are registered" (since := "2024-12-03")]
 def Environment.addDecl (env : Environment) (opts : Options) (decl : Declaration)
-    (cancelTk? : Option IO.CancelToken := none) : Except Kernel.Exception Environment :=
+    (cancelTk? : Option IO.CancelToken := none) : EIO Kernel.Exception Environment :=
   Environment.addDeclAux env opts decl cancelTk?
 
 private def isNamespaceName : Name → Bool
@@ -48,6 +48,14 @@ private def registerNamePrefixes (env : Environment) (name : Name) : Environment
 where go env
   | .str p _ => if isNamespaceName p then go (env.registerNamespace p) p else env
   | _        => env
+
+@[inline] def liftEIOCore (x : EIO Exception α) : CoreM α := do
+  x
+
+def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
 
 def addDecl (decl : Declaration) : CoreM Unit := do
   let mut env ← getEnv
@@ -88,8 +96,10 @@ where doAdd := do
     withTraceNode `Kernel (fun _ => return m!"typechecking declarations {decl.getNames}") do
       if !(← MonadLog.hasErrors) && decl.hasSorry then
         logWarning m!"declaration uses 'sorry'"
-      let env ← (← getEnv).addDeclAux (← getOptions) decl (← read).cancelTk?
-        |> ofExceptKernelException
+      let getEnv := (← getEnv).addDeclAux (← getOptions) decl (← read).cancelTk?
+      let env ← match ← ofKernelExceptionEIO getEnv with
+        | .inl env => pure env
+        | .inr e => throwKernelException e
       setEnv env
 
 def addAndCompile (decl : Declaration) : CoreM Unit := do

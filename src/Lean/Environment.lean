@@ -488,16 +488,21 @@ def asyncMayContain (env : Environment) (declName : Name) : Bool :=
 
 @[extern "lean_add_decl_new"]
 opaque addDeclCore' (env : Environment) (decl : Declaration) (check := true) :
-    Except KernelException Environment
+  EIO KernelException Environment
 
 -- @[extern "lean_elab_add_decl"]
 private opaque addDeclCheck (env : Environment) (maxHeartbeats : USize) (decl : Declaration)
-  (cancelTk? : @& Option IO.CancelToken) : Except Kernel.Exception Environment :=
+  (cancelTk? : @& Option IO.CancelToken) : EIO Kernel.Exception Environment :=
   addDeclCore' env decl
 
 @[extern "lean_elab_add_decl_without_checking"]
 private opaque addDeclWithoutChecking (env : Environment) (decl : @& Declaration) :
   Except Kernel.Exception Environment
+
+def toEIO (m : Except e α) : EIO e α := do
+  match m with
+  | .ok r => pure r
+  | .error e => throw e
 
 /--
 Adds given declaration to the environment, type checking it unless `doCheck` is false.
@@ -507,7 +512,7 @@ instead.
 -/
 def addDeclCore (env : Environment) (maxHeartbeats : USize) (decl : @& Declaration)
     (cancelTk? : @& Option IO.CancelToken) (doCheck := true) :
-    Except Kernel.Exception Environment := do
+    EIO Kernel.Exception Environment := do
   if let some ctx := env.asyncCtx? then
     if let some n := decl.getNames.find? (!ctx.mayContain ·) then
       throw <| .other s!"cannot add declaration {n} to environment as it is restricted to the \
@@ -515,7 +520,7 @@ def addDeclCore (env : Environment) (maxHeartbeats : USize) (decl : @& Declarati
   if doCheck then
     addDeclCheck env maxHeartbeats decl cancelTk?
   else
-    addDeclWithoutChecking env decl
+    toEIO $ addDeclWithoutChecking env decl
 
 @[inherit_doc Kernel.Environment.constants]
 def constants (env : Environment) : ConstMap :=
