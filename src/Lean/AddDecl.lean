@@ -52,10 +52,15 @@ where go env
 @[inline] def liftEIOCore (x : EIO Exception α) : CoreM α := do
   x
 
-def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
+private def _ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
   match m x with
   | .ok s I => .ok (.inl s) I
   | .error e I => .ok (.inr e) I
+
+def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
+  match ← _ofKernelExceptionEIO m with
+    | .inl env => pure env
+    | .inr e => throwKernelException e
 
 def addDecl (decl : Declaration) : CoreM Unit := do
   let mut env ← getEnv
@@ -97,9 +102,7 @@ where doAdd := do
       if !(← MonadLog.hasErrors) && decl.hasSorry then
         logWarning m!"declaration uses 'sorry'"
       let getEnv := (← getEnv).addDeclAux (← getOptions) decl (← read).cancelTk?
-      let env ← match ← ofKernelExceptionEIO getEnv with
-        | .inl env => pure env
-        | .inr e => throwKernelException e
+      let env ← ofKernelExceptionEIO getEnv
       setEnv env
 
 def addAndCompile (decl : Declaration) : CoreM Unit := do

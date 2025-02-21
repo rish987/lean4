@@ -1692,11 +1692,16 @@ namespace Kernel
   When implementing automation, consider using the `MetaM` methods. -/
 -- We use `Lean.Environment` for ease of use; as this is a debugging function, we forgo a
 -- `Kernel.Environment` base variant
-@[extern "lean_kernel_is_def_eq"]
-opaque isDefEq (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : Except Kernel.Exception Bool
+@[extern "lean_kernel_is_def_eq_new"]
+opaque isDefEq (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : EIO Kernel.Exception Bool
 
-def isDefEqGuarded (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : Bool :=
-  if let .ok result := isDefEq env lctx a b then result else false
+def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : EIO Kernel.Exception Bool := do
+  let result ←
+    try
+      isDefEq lps env lctx a b
+    catch _ =>
+      return false
+  return result
 
 /--
   Kernel WHNF function. We use it mainly for debugging purposes.

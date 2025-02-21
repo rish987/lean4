@@ -79,7 +79,7 @@ def checkInductiveTypes
                 loop stats (← whnf type) (i + 1) nindices fuel k
             else
               let param := stats.params[i]!
-              unless ← isDefEqCheckTypes dom (← getType param) do
+              unless ← isDefEqCheckTypes lparams dom (← getType param) do
                 throw <| .other "parameters of all inductive datatypes must match"
               let type := body.instantiate1 param
               loop stats (← whnf type) (i + 1) nindices fuel k
@@ -213,7 +213,7 @@ def checkConstructors (indTypes : Array InductiveType) (lparams : List Name)
       | fuel+1 => do
         if let .forallE name dom body bi := t then
           if let some param := stats.params[i]? then
-            unless ← isDefEqCheckTypes dom (← getType param) do
+            unless ← isDefEqCheckTypes lparams dom (← getType param) do
               throw <| .other
                 s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
             loop (body.instantiate1 param) (i + 1) fuel

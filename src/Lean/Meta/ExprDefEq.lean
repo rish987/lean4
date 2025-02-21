@@ -2094,6 +2094,17 @@ private def whnfCoreAtDefEq (e : Expr) : MetaM Expr := do
   else
     whnfCore e
 
+private def _ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
+
+def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
+  match ← _ofKernelExceptionEIO m with
+    | .inl env => pure env
+    | .inr e =>
+      throwKernelException e
+
 @[export lean_is_expr_def_eq]
 partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecDepth do
   withTraceNodeBefore `Meta.isDefEq (return m!"{t} =?= {s}") do
@@ -2150,6 +2161,15 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     -/
     let t ← instantiateMVars t
     let s ← instantiateMVars s
+    if not t.hasExprMVar && not s.hasExprMVar then
+      let mut lparams := []
+      for (lmvarId, _) in (← getMCtx).lDepth do
+        lparams := lmvarId.name :: lparams
+      let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
+        try
+          ofKernelExceptionEIO $ Lean.Kernel.isDefEq lparams (← getThe Lean.Core.State).env (← read).lctx t s
+        catch _ => pure false
+      if ret then return true
     let numPostponed ← getNumPostponed
     let k ← mkCacheKey t s
     match (← getCachedResult k) with
