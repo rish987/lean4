@@ -283,6 +283,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
         let aType ← inferType' a inferOnly
         let dType := fType.bindingDomain!
         if !(← isDefEqCheckTypes 15 dType aType) then
+          -- dbg_trace s!"DBG[230]: TypeChecker.lean:286: fType=\n{fType}\n{aType}"
           throw <| .appTypeMismatch (← getKEnv) (← getLCtx) e fType aType
         pure <| fType.bindingBody!.instantiate1 a
     | .letE .. => inferLet e inferOnly
@@ -539,14 +540,14 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
 def tryEtaStruct (t s : Expr) : RecM Bool :=
   tryEtaStructCore t s <||> tryEtaStructCore s t
 
-def isDefEqApp (t s : Expr) : RecM Bool := do
+def isDefEqApp (n : Nat) (t s : Expr) : RecM Bool := do
   unless t.isApp && s.isApp do return false
   t.withApp fun tf tArgs =>
   s.withApp fun sf sArgs => do
   unless tArgs.size == sArgs.size do return false
-  unless ← isDefEqCheckTypes 23 tf sf do return false
+  unless ← isDefEqCheckTypes (1000 + n) tf sf do return false
   for ta in tArgs, sa in sArgs do
-    unless ← isDefEqCheckTypes 24 ta sa do return false
+    unless ← isDefEqCheckTypes (2000 + n) ta sa do return false
   return true
 
 def isDefEqProofIrrel (T : Expr) : RecM LBool := do
@@ -678,6 +679,91 @@ def instantiateLevelParamsCtx (lctx : LocalContext) (paramNames : List Name) (lv
   {lctx with fvarIdToDecl := lctx.fvarIdToDecl.map fun d => instantiateLevelParamsDecl d paramNames lvls, decls := lctx.decls.map fun d? => d?.map fun d => instantiateLevelParamsDecl d paramNames lvls}
 
 open Lean.Meta in
+def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
+  -- let X ← inferType t
+  -- let Y ← inferType s
+  let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
+  -- try
+  --   _ ← inferType tEqs (inferOnly := false)
+  --   if not (← isDefEqCheckTypes 0 X Y) then
+  --     throw $ .other s!"invariant broken: {n}"
+  -- catch e =>
+  --   dbg_trace s!"DBG[220]: {n}, {← (e.toMessageData {}).toString}"
+
+  -- let lparams := (← readThe Context).lparams
+  let mut options := default
+  options := options.insert `trace.Meta.isDefEq (.ofBool true)
+
+  -- FIXME the below interferes with a kernel optimization
+  -- where we have avoided δ-expansion up to this point;
+  -- the `apply` tactic will δ-expand as necessary to perform unification
+  let check := (Lean.Meta.MetaM.run (do
+      -- TODO is this necessary?
+      -- let mlparams ← mkFreshLevelMVars lparams.length
+      -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
+      withLCtx' (← read).lctx do
+        -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
+        let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
+        -- for decl in (← read).lctx do
+        --   dbg_trace s!"DBG[223]: Apply.lean:29 {decl.type}"
+        let lem := `prfIrrel
+        if (← getEnv).contains lem then
+          try
+            -- dbg_trace s!"DBG[224]: TypeChecker.lean:712 (after try)"
+            let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
+            -- dbg_trace s!"DBG[225]: TypeChecker.lean:714 (after let gs ← eqMvar.mvarId!.apply (← mkC…)"
+            if gs.length > 0 then
+              return none
+            -- let gsExprs ← gs.mapM fun g => do
+            --   let d ← g.getDecl
+            --   pure d.type
+            pure $ .some (← instantiateMVars eqMvar)
+          catch _ =>
+            -- if r' == .true then
+            --   -- dbg_trace s!"DBG[221]: TypeChecker.lean:717 {mlparams}"
+            --   printTraces
+            --   dbg_trace s!"DBG[217]: TypeChecker.lean:696 \n{X}\n\n{Y}\n\n{← e.toMessageData.toString}, {l}"
+            pure none
+        else
+          -- dbg_trace s!"DBG[218]: TypeChecker.lean:699 (after else)"
+          pure none
+    ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+  let prf? ← match ← toKernelException check with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
+  if let some prf := prf? then
+    -- check that the proof returned by unification is well-typed with the kernel itself,
+    -- to minimize the trust that we place on elaboration routines
+    let mut n' := 0
+    try
+      _ ← inferType t (inferOnly := false)
+      n' := 1
+      _ ← inferType s (inferOnly := false)
+      n' := 2
+      _ ← inferType prf (inferOnly := false)
+    catch e =>
+      throw e
+    return .true
+
+  return .undef
+
+    -- if rs.length == 0 then return true
+    -- else
+    --   let mut allDefEq := true
+    --   for r in rs do
+    --     let args := r.getAppArgs
+    --     let .const `Eq [l'] := r.getAppFn | throw $ .other "invalid form for prerequesite lemma of extensional rule"
+    --     let T' := args[0]!
+    --     let t' := args[1]!
+    --     let s' := args[2]!
+    --     if not (← isDefEq 6 t' s' l' T') then
+    --       allDefEq := false
+    --       break
+    --   if allDefEq then
+    --     return true
+
 def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r ← quickIsDefEq t s l T (useHash := true)
   if r != .undef then return r == .true
@@ -693,80 +779,15 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     if r != .undef then return r == .true
 
   -- let r' ← isDefEqProofIrrel T
+  let r' ← isDefEqExt t s l T
 
-  -- let X ← inferType t
-  -- let Y ← inferType s
-  let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
-  -- try
-  --   _ ← inferType tEqs (inferOnly := false)
-  --   if not (← isDefEqCheckTypes 0 X Y) then
-  --     throw $ .other s!"invariant broken: {n}"
-  -- catch e =>
-  --   dbg_trace s!"DBG[220]: {n}, {← (e.toMessageData {}).toString}"
-
-  let lparams := (← readThe Context).lparams
-  let mut options := default
-  options := options.insert `trace.Meta.isDefEq (.ofBool true)
-
-  -- FIXME the below interferes with a kernel optimization
-  -- where we have avoided δ-expansion up to this point;
-  -- the `apply` tactic will δ-expand as necessary to perform unification
-  let check := (Lean.Meta.MetaM.run (do
-      -- TODO is this necessary?
-      let mlparams ← mkFreshLevelMVars lparams.length
-      let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
-      withLCtx' mlctx do
-        let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
-        -- for decl in (← read).lctx do
-        --   dbg_trace s!"DBG[223]: Apply.lean:29 {decl.type}"
-        let lem := `prfIrrel
-        if (← getEnv).contains lem then
-          try
-            -- dbg_trace s!"DBG[224]: TypeChecker.lean:712 (after try)"
-            let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
-            -- dbg_trace s!"DBG[225]: TypeChecker.lean:714 (after let gs ← eqMvar.mvarId!.apply (← mkC…)"
-            let gsExprs ← gs.mapM fun g => do
-              let d ← g.getDecl
-              pure d.type
-            pure $ .some gsExprs
-          catch e =>
-            -- if r' == .true then
-            --   -- dbg_trace s!"DBG[221]: TypeChecker.lean:717 {mlparams}"
-            --   printTraces
-            --   dbg_trace s!"DBG[217]: TypeChecker.lean:696 \n{X}\n\n{Y}\n\n{← e.toMessageData.toString}, {l}"
-            pure none
-        else
-          -- dbg_trace s!"DBG[218]: TypeChecker.lean:699 (after else)"
-          pure none
-    ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
-  let reqs ← match ← toKernelException check with
-  | .inl ((reqs, _), _) => pure reqs
-  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
-  | .inr (.error _ d) => throw $ .other (← d.toString)
-
-  if let some rs := reqs then
-    if rs.length == 0 then return true
-    else
-      let mut allDefEq := true
-      for r in rs do
-        let args := r.getAppArgs
-        let .const `Eq [l'] := r.getAppFn | throw $ .other "invalid form for prerequesite lemma of extensional rule"
-        let T' := args[0]!
-        let t' := args[1]!
-        let s' := args[2]!
-        if not (← isDefEq 6 t' s' l' T') then
-          allDefEq := false
-          break
-      if allDefEq then
-        return true
-
-  -- if r' != .undef then
-  --   if r' == .true then
-  --     dbg_trace s!"DBG[216]: TypeChecker.lean:724 {reqs}"
-  --   -- for lem in (Lean.Meta.DfEq.dfEqExt.getState ((← readThe Context).env')) do
-  --   --   dbg_trace s!"DBG[205]: TypeChecker.lean:545 {lem}"
-  --   -- dbg_trace s!"DBG[207]: {r}"
-  --   return r' == .true
+  if r' != .undef then
+    -- if r' == .true then
+    --   dbg_trace s!"DBG[216]: TypeChecker.lean:724 {reqs}"
+    -- for lem in (Lean.Meta.DfEq.dfEqExt.getState ((← readThe Context).env')) do
+    --   dbg_trace s!"DBG[205]: TypeChecker.lean:545 {lem}"
+    -- dbg_trace s!"DBG[207]: {r}"
+    return r' == .true
 
   match ← lazyDeltaReduction tn sn l T with
   | .continue .. => unreachable!
@@ -786,7 +807,7 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
     return ← isDefEqCore 14 tnn snn l T
 
-  if ← isDefEqApp tn sn then return true
+  if ← isDefEqApp n tn sn then return true
   if ← tryEtaExpansion tn sn l T then return true
   if ← tryEtaStruct tn sn then return true
   let r ← tryStringLitExpansion tn sn
@@ -818,6 +839,9 @@ def check (e : Expr) (lps : List Name) : M Expr :=
 def whnf (e : Expr) : M Expr := (Inner.whnf e).run
 
 def inferType (e : Expr) : M Expr := (Inner.inferType e).run
+
+def isDefEqCheckTypes' (n : Nat) (lps : List Name) (t s : Expr) : M Bool :=
+  withReader ({ · with lparams := lps }) (Inner.isDefEqCheckTypes n t s).run
 
 def isDefEqCheckTypes (lps : List Name) (t s : Expr) : M Bool :=
   withReader ({ · with lparams := lps }) (Inner.isDefEqCheckTypes 26 t s).run
@@ -858,6 +882,6 @@ def etaExpand (e : Expr) : M Expr :=
   loop #[] e
 
 @[export lean_kernel_is_def_eq_new]
-def isDefEqK (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : EIO Kernel.Exception Bool :=
+def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : EIO Kernel.Exception Bool :=
   M.run env.toKernelEnv env (lctx := lctx) (safety := DefinitionSafety.safe) do
-    TypeChecker.isDefEqCheckTypes lps a b
+    TypeChecker.isDefEqCheckTypes' (500 + n) lps a b

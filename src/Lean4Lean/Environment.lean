@@ -37,7 +37,7 @@ def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true)
       checkNoMVarNoFVar newEnv v.name v.value
       M.run newEnv env' (safety := .unsafe) (lctx := {}) do
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEqCheckTypes v.levelParams valType v.type) then
+        if !(← TypeChecker.isDefEqCheckTypes' 27 v.levelParams valType v.type) then
           throw <| .declTypeMismatch newEnv (.defnDecl v) valType
     return newEnv
   else
@@ -46,7 +46,7 @@ def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true)
         checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
         checkNoMVarNoFVar env v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEqCheckTypes v.levelParams valType v.type) then
+        if !(← TypeChecker.isDefEqCheckTypes' 28 v.levelParams valType v.type) then
           throw <| .declTypeMismatch env (.defnDecl v) valType
     return add env (.defnInfo v)
 
@@ -60,7 +60,7 @@ def addTheorem (env : Kernel.Environment) (v : TheoremVal) (check := true) :
       checkConstantVal env v.toConstantVal
       checkNoMVarNoFVar env v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← TypeChecker.isDefEqCheckTypes v.levelParams valType v.type) then
+      if !(← TypeChecker.isDefEqCheckTypes' 29 v.levelParams valType v.type) then
         throw <| .declTypeMismatch env (.thmDecl v) valType
   return add env (.thmInfo v)
 
@@ -70,7 +70,7 @@ def addOpaque (env : Kernel.Environment) (v : OpaqueVal) (check := true) :
     M.run env env' (safety := .safe) (lctx := {}) do
       checkConstantVal env v.toConstantVal
       let valType ← TypeChecker.check v.value v.levelParams
-      if !(← TypeChecker.isDefEqCheckTypes v.levelParams valType v.type) then
+      if !(← TypeChecker.isDefEqCheckTypes' 30 v.levelParams valType v.type) then
         throw <| .declTypeMismatch env (.opaqueDecl v) valType
   return add env (.opaqueInfo v)
 
@@ -94,7 +94,7 @@ def addMutual (env : Kernel.Environment) (vs : List DefinitionVal) (check := tru
       for v in vs do
         checkNoMVarNoFVar newEnv v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
-        if !(← TypeChecker.isDefEqCheckTypes v.levelParams valType v.type) then
+        if !(← TypeChecker.isDefEqCheckTypes' 31 v.levelParams valType v.type) then
           throw <| .declTypeMismatch newEnv (.mutualDefnDecl vs) valType
   return newEnv
 end Kernel.Environment

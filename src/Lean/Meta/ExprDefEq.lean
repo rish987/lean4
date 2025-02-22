@@ -2166,9 +2166,8 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
       for (lmvarId, _) in (← getMCtx).lDepth do
         lparams := lmvarId.name :: lparams
       let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
-        try
-          ofKernelExceptionEIO $ Lean.Kernel.isDefEq lparams (← getThe Lean.Core.State).env (← read).lctx t s
-        catch _ => pure false
+          let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env (← read).lctx t s
+          pure ret
       if ret then return true
     let numPostponed ← getNumPostponed
     let k ← mkCacheKey t s

@@ -66,7 +66,8 @@ def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Unit (Sum α Kernel
 /-- Add a declaration, possibly throwing a `Kernel.Exception`. -/
 def addDecl (d : Declaration) : M Unit := do
   let getEnv := EIO.toIO (fun _ => .userError <| "impossible") $ ofKernelExceptionEIO $ (← get).env.addDeclCore 0 d (cancelTk? := none)
-  match ← getEnv with
+  let ret ← getEnv
+  match ret with
     | .inl env => modify fun s => { s with env := env }
     | .inr e => throwKernelException e
 
