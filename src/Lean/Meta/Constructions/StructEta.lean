@@ -14,16 +14,24 @@ open Lean Meta
 def mkStructEta (n : Name) : MetaM Unit := do
   let .inductInfo indVal ← getConstInfo n | unreachable!
   if not (isStructureLike (← getEnv) n) then return
+  let .ctorInfo ctorInfo ← getConstInfo indVal.ctors[0]! | unreachable!
 
-  let decl ← forallTelescope recInfo.type fun xs t => do
-    let e := .const recInfo.name (recInfo.levelParams.map (.param ·))
-    let e := mkAppN e xs
+  let decl ← forallTelescope ctorInfo.type fun xs t => do
+    let params := xs[:indVal.numParams]
+    -- let e := .const recInfo.name (recInfo.levelParams.map (.param ·))
+    let T := mkAppN (.const indVal.name (indVal.levelParams.map mkLevelParam)) params
+    withLocalDecl `s BinderInfo.implicit T fun s =>
+    withLocalDecl `s' BinderInfo.implicit T fun s' => do
+    let numProj := ctorInfo.numFields
+    let mut hypTypes := #[]
+    for projIdx in [:numProj] do
+      let type := Lean.mkAppN (Expr.const `Eq sorry) #[.proj indVal.name projIdx s]
+      hypTypes := hypTypes.push hyp
     -- We reorder the parameters
     -- before: As Cs minor_premises indices major-premise
     -- fow:    As Cs indices major-premise minor-premises
-    let AC_size := xs.size - recInfo.numMinors - recInfo.numIndices - 1
     let vs :=
-      xs[:AC_size] ++
+      params ++
       xs[AC_size + recInfo.numMinors:AC_size + recInfo.numMinors + 1 + recInfo.numIndices] ++
       xs[AC_size:AC_size + recInfo.numMinors]
     let type ← mkForallFVars vs t
