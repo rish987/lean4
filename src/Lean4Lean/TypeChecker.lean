@@ -54,7 +54,7 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → M Bool
   whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
-  whnf (e : Expr) : M Expr
+  whnf (e : Expr) (d : Option (Level × Expr)) : M Expr
   inferType (e : Expr) (inferOnly : Bool) : M Expr
 
 abbrev RecM := ReaderT Methods M
@@ -66,21 +66,21 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def whnf (e : Expr) : RecM Expr := fun m => m.whnf e
+def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecM Expr := fun m => m.whnf e d 
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-def ensureSortCore (e s : Expr) : RecM Expr := do
+def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
   if e.isSort then return e
-  let e ← whnf e
+  let e ← whnf e d
   if e.isSort then return e
-  -- throw <| .typeExpected (← getKEnv) (← getLCtx) s
-  throw <| .other s!"{e.ctorName}, {e}"
+  throw <| .typeExpected (← getKEnv) (← getLCtx) s
+  -- throw <| .other s!"{e.ctorName}, {e}"
 
-def ensureForallCore (e s : Expr) : RecM Expr := do
+def ensureForallCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
   if e.isForall then return e
-  let e ← whnf e
+  let e ← whnf e d
   if e.isForall then return e
   throw <| .funExpected (← getKEnv) (← getLCtx) s
 
@@ -122,7 +122,8 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       if !inferOnly then
-        _ ← ensureSortCore (← inferType d inferOnly) d
+        let dType ← inferType d inferOnly
+        _ ← ensureSortCore dType d
       loop fvars body
   | e => do
     let r ← inferType (e.instantiateRev fvars) inferOnly
@@ -213,11 +214,11 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
     return (← getLCtx).mkForall fvars r
 
 def isProp (e : Expr) : RecM Bool :=
-  return (← whnf (← inferType e)) == .prop
+  return (← whnf (← inferType e) none) == .prop
 
 def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Expr := do
   let e := Expr.proj typeName idx struct
-  let type ← whnf structType
+  let type ← whnf structType none
   type.withApp fun I args => do
   let env ← getKEnv
   let fail {_} := do throw <| .invalidProj env (← getLCtx) e
@@ -229,25 +230,30 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   let c_info ← env.get c
   let mut r := c_info.instantiateTypeLevelParams I_levels
   for i in [:I_val.numParams] do
-    let .forallE _ _ b _ ← whnf r | fail
+    let .forallE _ _ b _ ← whnf r none | fail
     r := b.instantiate1 args[i]!
   let isPropType ← isProp type
   for i in [:idx] do
-    let .forallE _ dom b _ ← whnf r | fail
+    let .forallE _ dom b _ ← whnf r none | fail
     if b.hasLooseBVars then
       if isPropType then if !(← isProp dom) then fail
       r := b.instantiate1 (.proj I_name i struct)
     else
       r := b
-  let .forallE _ dom _ _ ← whnf r | fail
+  let .forallE _ dom _ _ ← whnf r none | fail
   if isPropType then if !(← isProp dom) then fail
   return dom
+
+def getTypeInfo (t : Expr) : RecM (Level × Expr) := do
+  let tT ← inferType t
+  let tTT ← inferType tT
+  let .sort l ← ensureSortCore tTT tT | unreachable!
+  pure (l, tT)
 
 -- TODO an optimization to "tag" terms with their types during type inference
 -- can avoid this, however we will need to use a custom `Expr` representation
 def isDefEqCheckTypes (n : Nat) (t s : Expr) : RecM Bool := do
-  let tT ← inferType t
-  let .sort l ← whnf $ ← inferType tT | throw $ .other "expected sort"
+  let (l, tT) ← getTypeInfo t
   let sT ← inferType s
   unless ← isDefEq 2 tT sT (.succ l) (.sort l) do return false
   isDefEq n t s l tT
@@ -298,7 +304,7 @@ def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
 def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let env ← getKEnv
   if env.quotInit then
-    if let some r ← quotReduceRec e whnf then
+    if let some r ← quotReduceRec e (whnf) then
       return r
   let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
   if let some r ← inductiveReduceRec env e whnf' inferType (isDefEqCheckTypes 16) then
@@ -434,11 +440,66 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
   return none
 
-def whnf' (e : Expr) : RecM Expr := do
+def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
+
+open Lean.Meta in
+def reduceExt (e : Expr) (d : Level × Expr) : RecM (Option Expr) := do
+  let (l, T) := d
+  let .const i _ := (← whnf T).getAppFn | return none
+  -- let .inductInfo iInfo ← (← getKEnv).get i | return none
+  let .recInfo rInfo ← (← getKEnv).get (mkRecName i) | return none
+  if not rInfo.k then return none
+
+  -- let lparams := (← readThe Context).lparams
+  let mut options := default
+  options := options.insert `trace.Meta.isDefEq (.ofBool true)
+
+  let check := (Lean.Meta.MetaM.run (do
+    withLCtx' (← read).lctx do
+      let sMvar ← Lean.Meta.mkFreshExprMVar T
+      let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
+      -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
+      let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
+      let lem := .str i "_k"
+      if (← getEnv).contains lem then
+        try
+          let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
+          if gs.length > 0 then
+            return none
+          -- let gsExprs ← gs.mapM fun g => do
+          --   let d ← g.getDecl
+          --   pure d.type
+          pure $ .some ((← instantiateMVars eqMvar), (← instantiateMVars sMvar))
+        catch _ =>
+          pure none
+      else
+        pure none
+    ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+  let ret? ← match ← toKernelException check with
+  | .inl ((ret?, _), _) => pure ret?
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
+  if let some (prf, s) := ret? then
+    -- check that the proof returned by unification is well-typed with the kernel itself,
+    -- to minimize the trust that we place on the elaborator
+    try
+      _ ← inferType prf (inferOnly := false)
+    catch e =>
+      throw e
+    return s
+
+  return none
+
+def whnf' (e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
   -- Do not cache easy cases
+  let l ← l.getDM (getTypeInfo e)
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
-  | .mdata _ e => return ← whnf' e
+  | .mdata _ e => return ← whnf' e l
   | .fvar id =>
     if !isLetFVar (← getLCtx) id then
       return e
@@ -453,6 +514,7 @@ def whnf' (e : Expr) : RecM Expr := do
     let t ← whnfCore' t
     if let some t ← reduceNative env t then return t
     if let some t ← reduceNat t then return t
+    let t := (← reduceExt t l).getD t
     let some t := unfoldDefinition env t | return t
     loop t fuel
   let r ← loop e 1000
@@ -664,13 +726,6 @@ def isDefEqUnitLike (T : Expr) : RecM Bool := do
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
   return true
 
-def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
-  match m x with
-  | .ok s I => .ok (.inl s) I
-  | .error e I => .ok (.inr e) I
-
-
-
 def instantiateLevelParamsDecl (decl : LocalDecl) (paramNames : List Name) (lvls : List Level) : LocalDecl := match decl with
   | .cdecl index fvarId userName type bi kind => .cdecl index fvarId userName (type.instantiateLevelParams paramNames lvls) bi kind
   | .ldecl index fvarId userName type value nonDep kind => .ldecl index fvarId userName (type.instantiateLevelParams paramNames lvls) (value.instantiateLevelParams paramNames lvls) nonDep kind
@@ -704,14 +759,10 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       withLCtx' (← read).lctx do
         -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
         let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
-        -- for decl in (← read).lctx do
-        --   dbg_trace s!"DBG[223]: Apply.lean:29 {decl.type}"
-        let lem := `prfIrrel
+        let lem := ``prfIrrel
         if (← getEnv).contains lem then
           try
-            -- dbg_trace s!"DBG[224]: TypeChecker.lean:712 (after try)"
             let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
-            -- dbg_trace s!"DBG[225]: TypeChecker.lean:714 (after let gs ← eqMvar.mvarId!.apply (← mkC…)"
             if gs.length > 0 then
               return none
             -- let gsExprs ← gs.mapM fun g => do
@@ -719,13 +770,8 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
             --   pure d.type
             pure $ .some (← instantiateMVars eqMvar)
           catch _ =>
-            -- if r' == .true then
-            --   -- dbg_trace s!"DBG[221]: TypeChecker.lean:717 {mlparams}"
-            --   printTraces
-            --   dbg_trace s!"DBG[217]: TypeChecker.lean:696 \n{X}\n\n{Y}\n\n{← e.toMessageData.toString}, {l}"
             pure none
         else
-          -- dbg_trace s!"DBG[218]: TypeChecker.lean:699 (after else)"
           pure none
     ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let prf? ← match ← toKernelException check with
@@ -735,13 +781,8 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
 
   if let some prf := prf? then
     -- check that the proof returned by unification is well-typed with the kernel itself,
-    -- to minimize the trust that we place on elaboration routines
-    let mut n' := 0
+    -- to minimize the trust that we place on the elaborator
     try
-      _ ← inferType t (inferOnly := false)
-      n' := 1
-      _ ← inferType s (inferOnly := false)
-      n' := 2
       _ ← inferType prf (inferOnly := false)
     catch e =>
       throw e
@@ -823,12 +864,12 @@ def Methods.withFuel : Nat → Methods
   | 0 =>
     { isDefEqCore := fun _ _ _ _ _ => throw .deepRecursion
       whnfCore := fun _ _ _ => throw .deepRecursion
-      whnf := fun _ => throw .deepRecursion
+      whnf := fun _ _ => throw .deepRecursion
       inferType := fun _ _ => throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun _n t s l T => isDefEqCore' _n t s l T (withFuel n)
       whnfCore := fun e r p => whnfCore' e r p (withFuel n)
-      whnf := fun e => whnf' e (withFuel n)
+      whnf := fun e l => whnf' e l (withFuel n)
       inferType := fun e i => inferType' e i (withFuel n) }
 
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
