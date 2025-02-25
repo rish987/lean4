@@ -247,6 +247,9 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
 def getTypeInfo (t : Expr) : RecM (Level × Expr) := do
   let tT ← inferType t
   let tTT ← inferType tT
+  -- note that it is important that we do not immediately run `whnf tTT`,
+  -- as this would cause non-termination: we call this function in `whnf`
+  -- itself to get the information needed for β rules
   let .sort l ← ensureSortCore tTT tT | unreachable!
   pure (l, tT)
 
@@ -486,6 +489,7 @@ def reduceExt (e : Expr) (d : Level × Expr) : RecM (Option Expr) := do
   if let some (prf, s) := ret? then
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on the elaborator
+    if s == e then return none
     try
       _ ← inferType prf (inferOnly := false)
     catch e =>
@@ -495,31 +499,41 @@ def reduceExt (e : Expr) (d : Level × Expr) : RecM (Option Expr) := do
   return none
 
 def whnf' (e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
-  -- Do not cache easy cases
   let l ← l.getDM (getTypeInfo e)
+  -- Do not cache easy cases
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
-  | .mdata _ e => return ← whnf' e l
-  | .fvar id =>
-    if !isLetFVar (← getLCtx) id then
-      return e
-  | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
-  -- check cache
-  if let some r := (← get).whnfCache[e]? then
+  | .mdata _ e => return ← whnf e l
+  | _ => pure ()
+
+  if let .some e' ← reduceExt e l then
+    whnf e' l
+  else
+    match e with
+    | .fvar id =>
+      if !isLetFVar (← getLCtx) id then
+        let e := (← reduceExt e l).getD e
+        return e
+    | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
+    | _ => unreachable!
+    -- check cache
+    if let some r := (← get).whnfCache[e]? then
+      return r
+    let rec loop t
+    | 0 => throw .deterministicTimeout
+    | fuel+1 => do
+      let env ← getKEnv
+      let t ← whnfCore' t
+      if let some t ← reduceNative env t then return t
+      if let some t ← reduceNat t then return t
+      if let .some t' ← reduceExt t l then
+        whnf t' l
+      else
+        let some t := unfoldDefinition env t | return t
+        loop t fuel
+    let r ← loop e 1000
+    modify fun s => { s with whnfCache := s.whnfCache.insert e r }
     return r
-  let rec loop t
-  | 0 => throw .deterministicTimeout
-  | fuel+1 => do
-    let env ← getKEnv
-    let t ← whnfCore' t
-    if let some t ← reduceNative env t then return t
-    if let some t ← reduceNat t then return t
-    -- let t := (← reduceExt t l).getD t
-    let some t := unfoldDefinition env t | return t
-    loop t fuel
-  let r ← loop e 1000
-  modify fun s => { s with whnfCache := s.whnfCache.insert e r }
-  return r
 
 def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
@@ -753,6 +767,13 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   -- where we have avoided δ-expansion up to this point;
   -- the `apply` tactic will δ-expand as necessary to perform unification
   let check := (Lean.Meta.MetaM.run (do
+      -- let here :=
+      --   if let .fvar idt := t then
+      --     if let .fvar ids := s then
+      --       true
+      --     else false
+      --   else false
+
       -- TODO is this necessary?
       -- let mlparams ← mkFreshLevelMVars lparams.length
       -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
@@ -819,8 +840,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
 
-  let r' ← isDefEqProofIrrel T
-  -- let r' ← isDefEqExt t s l T
+  -- let r' ← isDefEqProofIrrel T
+  let r' ← isDefEqExt t s l T
 
   if r' != .undef then
     -- if r' == .true then

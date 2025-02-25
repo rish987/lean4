@@ -71,8 +71,8 @@ def inductiveReduceRec [Monad m] (env : Kernel.Environment) (e : Expr)
   let majorIdx := info.getMajorIdx
   let some major := recArgs[majorIdx]? | return none
   let mut major := major
-  -- if info.k && not (info.name == ``Eq.rec) then
-  if info.k then
+  if info.k && not (info.name == ``Eq.rec) then
+  -- if info.k then
     major ← toCtorWhenK env whnf inferType isDefEq info major
   match ← whnf major with
   | .lit l => major := l.toConstructor

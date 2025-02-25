@@ -121,6 +121,10 @@ partial def replayConstant (name : Name) : M Unit := do
             type := ci.type
             ctors := ctors.map fun ci => { name := ci.name, type := ci.type } }
         addDecl (Declaration.inductDecl lparams nparams types false)
+        if let [o] := all then -- TODO need a more general solution
+          if o.name == ``Eq then
+            if (← read).newConstants.contains ``Eq._k then
+              replayConstant ``Eq._k
       -- We postpone checking constructors,
       -- and at the end make sure they are identical
       -- to the constructors generated when we replay the inductives.
@@ -180,6 +184,8 @@ def replay (newConstants : Std.HashMap Name ConstantInfo) (env : Environment) : 
       remaining := remaining.insert n
   let (_, s) ← StateRefT'.run (s := { env, remaining }) do
     ReaderT.run (r := { newConstants }) do
+      if newConstants.contains ``prfIrrel then
+        replayConstant ``prfIrrel
       for n in remaining do
         replayConstant n
       checkPostponedConstructors
