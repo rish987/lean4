@@ -6,6 +6,8 @@ open TypeChecker
 
 open private add from Lean.Environment
 
+def lam (d b : Expr) : Expr := .lam `a d b .default
+
 def checkPrimitiveDef (env : Kernel.Environment) (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let nat := .const ``Nat []
@@ -18,8 +20,8 @@ def checkPrimitiveDef (env : Kernel.Environment) (v : DefinitionVal) : M Bool :=
   let add := mkApp2 (.const ``Nat.add [])
   let mul := mkApp2 (.const ``Nat.mul [])
   let mod := mkApp2 (.const ``Nat.mod [])
-  let defeq1 a b := TypeChecker.isDefEqCheckTypes [] (.arrow nat a) (.arrow nat b)
-  let defeq2 a b := defeq1 (.arrow nat a) (.arrow nat b)
+  let defeq1 a b := TypeChecker.isDefEqCheckTypes [] (lam nat a) (lam nat b)
+  let defeq2 a b := defeq1 (lam nat a) (lam nat b)
   let x := .bvar 0
   let y := .bvar 1
   match v.name with

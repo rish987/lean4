@@ -514,7 +514,7 @@ def whnf' (e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
     let t ← whnfCore' t
     if let some t ← reduceNative env t then return t
     if let some t ← reduceNat t then return t
-    let t := (← reduceExt t l).getD t
+    -- let t := (← reduceExt t l).getD t
     let some t := unfoldDefinition env t | return t
     loop t fuel
   let r ← loop e 1000
@@ -819,8 +819,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
 
-  -- let r' ← isDefEqProofIrrel T
-  let r' ← isDefEqExt t s l T
+  let r' ← isDefEqProofIrrel T
+  -- let r' ← isDefEqExt t s l T
 
   if r' != .undef then
     -- if r' == .true then

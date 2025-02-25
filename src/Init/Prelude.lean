@@ -281,6 +281,8 @@ inductive Eq : α → α → Prop where
   equality type. See also `rfl`, which is usually used instead. -/
   | refl (a : α) : Eq a a
 
+axiom Eq._k {α : Sort u_1} (a : α) (p : Eq a a) : Eq p (@Eq.refl α a)
+
 /-- Non-dependent recursor for the equality type. -/
 @[simp] abbrev Eq.ndrec.{u1, u2} {α : Sort u2} {a : α} {motive : α → Sort u1} (m : motive a) {b : α} (h : Eq a b) : motive b :=
   h.rec m
