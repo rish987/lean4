@@ -8,4 +8,5 @@ import Lean.Meta.Constructions.CasesOn
 import Lean.Meta.Constructions.NoConfusion
 import Lean.Meta.Constructions.RecOn
 import Lean.Meta.Constructions.BRecOn
+import Lean.Meta.Constructions.K
 -- import Lean.Meta.Constructions.StructEta

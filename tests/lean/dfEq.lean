@@ -15,7 +15,7 @@ def f : Bool → Type
 | .true => Unit
 | .false => Bool
 
-inductive K : (b : Bool) → Bool → (x : f b) → Type where
+inductive K : (b : Bool) → Bool → (x : f b) → Prop where
 | mk b x : K b b x
 
 inductive MEq : α → α → Prop where

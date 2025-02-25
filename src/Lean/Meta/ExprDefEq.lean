@@ -2105,6 +2105,29 @@ def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
     | .inr e =>
       throwKernelException e
 
+def instantiateLDeclIfNoMVars (l : LocalDecl) : MetaM (Option LocalDecl) := do
+  match l with
+  | .cdecl idx id n t bi k =>
+    let t ← instantiateMVars t
+    if t.hasExprMVar then
+      return none
+    return .some $ .cdecl idx id n t bi k
+  | .ldecl idx id n t v nd k =>
+    let t ← instantiateMVars t
+    if t.hasExprMVar then
+      return none
+    let v ← instantiateMVars v
+    if v.hasExprMVar then
+      return none
+    return .some $ .ldecl idx id n t v nd k
+
+def instantiateLCtxIfNoMVars : MetaM (Option LocalContext) := do
+  let mut newLctx := default
+  for decl in (← read).lctx do
+    let .some instDecl ← instantiateLDeclIfNoMVars decl | return none
+    newLctx := newLctx.addDecl instDecl
+  return some newLctx
+
 @[export lean_is_expr_def_eq]
 partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecDepth do
   withTraceNodeBefore `Meta.isDefEq (return m!"{t} =?= {s}") do
@@ -2161,14 +2184,15 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     -/
     let t ← instantiateMVars t
     let s ← instantiateMVars s
-    if not t.hasExprMVar && not s.hasExprMVar then
-      let mut lparams := []
-      for (lmvarId, _) in (← getMCtx).lDepth do
-        lparams := lmvarId.name :: lparams
-      let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
-          let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env (← read).lctx t s
-          pure ret
-      if ret then return true
+    -- if not t.hasExprMVar && not s.hasExprMVar then
+    --   if let some lctx ← instantiateLCtxIfNoMVars then
+    --     let mut lparams := []
+    --     for (lmvarId, _) in (← getMCtx).lDepth do
+    --       lparams := lmvarId.name :: lparams
+    --     let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
+    --       let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s
+    --       pure ret
+    --     if ret then return true
     let numPostponed ← getNumPostponed
     let k ← mkCacheKey t s
     match (← getCachedResult k) with

@@ -6,6 +6,8 @@ open TypeChecker
 
 open private add from Lean.Environment
 
+def lam (d b : Expr) : Expr := .lam `a d b .default
+
 def checkPrimitiveDef (env : Kernel.Environment) (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let nat := .const ``Nat []
@@ -18,20 +20,29 @@ def checkPrimitiveDef (env : Kernel.Environment) (v : DefinitionVal) : M Bool :=
   let add := mkApp2 (.const ``Nat.add [])
   let mul := mkApp2 (.const ``Nat.mul [])
   let mod := mkApp2 (.const ``Nat.mod [])
-  let defeq1 a b := TypeChecker.isDefEqCheckTypes [] (.arrow nat a) (.arrow nat b)
-  let defeq2 a b := defeq1 (.arrow nat a) (.arrow nat b)
+  let defeq1 a b := TypeChecker.isDefEqCheckTypes [] (lam nat a) (lam nat b)
+  let defeq2 a b := defeq1 (lam nat a) (lam nat b)
   let x := .bvar 0
   let y := .bvar 1
   match v.name with
   | ``Nat.add =>
-    unless env.constants.contains ``Nat && v.levelParams.isEmpty do fail
+    dbg_trace s!"DBG[274]: Primitive.lean:28 (after | Nat.add =>)"
+    unless env.constants.contains ``Nat && v.levelParams.isEmpty do
+      dbg_trace s!"DBG[276]: Primitive.lean:30 (after unless env.constants.contains Nat && v.l…)"
+      fail
     -- add : Nat → Nat → Nat
-    unless ← TypeChecker.isDefEqCheckTypes [] v.type (.arrow nat (.arrow nat nat)) do fail
+    unless ← TypeChecker.isDefEqCheckTypes [] v.type (.arrow nat (.arrow nat nat)) do
+      dbg_trace s!"DBG[275]: Primitive.lean:33 (after unless ← TypeChecker.isDefEqCheckTypes…)"
+      fail
     let add := mkApp2 v.value
     -- add x 0 ≡ x
-    unless ← defeq1 (add x zero) x do fail
+    unless ← defeq1 (add x zero) x do
+      dbg_trace s!"DBG[272]: Primitive.lean:36 (after unless ← defeq1 (add x zero) x do)"
+      fail
     -- add y (succ x) ≡ succ (add y x)
-    unless ← defeq2 (add y (succ x)) (succ (add y x)) do fail
+    unless ← defeq2 (add y (succ x)) (succ (add y x)) do
+      dbg_trace s!"DBG[273]: Primitive.lean:40 (after unless ← defeq2 (add y (succ x)) (succ…)"
+      fail
   | ``Nat.pred =>
     unless env.constants.contains ``Nat && v.levelParams.isEmpty do fail
     -- pred : Nat → Nat

@@ -92,7 +92,7 @@ def checkInductiveTypes
             throw <| .other "number of parameters mismatch in inductive datatype declaration"
           k type stats nindices
       loop stats (← whnf type) 0 0 1000 fun type stats nindices => do
-      let type ← ensureSort type
+      let type ← ensureSort 11 type
       let mut stats := stats
       let resultLevel := type.sortLevel!
       if stats.indConsts.isEmpty then

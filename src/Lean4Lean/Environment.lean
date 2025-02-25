@@ -9,19 +9,22 @@ open Lean.TypeChecker
 
 open private add from Lean.Environment
 
-def checkConstantVal (env : Kernel.Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
-  checkName env v.name allowPrimitive
+def checkConstantVal (n : Nat) (env : Kernel.Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
+  try
+    checkName env v.name allowPrimitive
+  catch e =>
+    throw e
   checkDuplicatedUnivParams v.levelParams
   checkNoMVarNoFVar env v.name v.type
   let sort ← TypeChecker.check v.type v.levelParams
-  _ ← ensureSort sort v.type
+  _ ← ensureSort 10 sort v.type
 
 variable (env' : Lean.Environment)
 
 def addAxiom (env : Kernel.Environment) (v : AxiomVal) (check := true) :
     EIO KernelException Kernel.Environment := do
   if check then
-    _ ← (checkConstantVal env v.toConstantVal).run env env'
+    _ ← (checkConstantVal 1 env v.toConstantVal).run env env'
       (safety := if v.isUnsafe then .unsafe else .safe)
   return (add env (.axiomInfo v))
 
@@ -31,7 +34,7 @@ def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true)
     -- Meta definition can be recursive.
     -- So, we check the header, add, and then type check the body.
     if check then
-      _ ← (checkConstantVal env v.toConstantVal).run env env' (safety := .unsafe)
+      _ ← (checkConstantVal 2 env v.toConstantVal).run env env' (safety := .unsafe)
     let newEnv := add env (.defnInfo v)
     if check then
       checkNoMVarNoFVar newEnv v.name v.value
@@ -43,7 +46,10 @@ def addDefinition (env : Kernel.Environment) (v : DefinitionVal) (check := true)
   else
     if check then
       M.run env env' (safety := .safe) (lctx := {}) do
-        checkConstantVal env v.toConstantVal (← checkPrimitiveDef env v)
+        let allowPrimitive ← checkPrimitiveDef env v
+        checkConstantVal 3 env v.toConstantVal allowPrimitive
+        if v.name == ``Nat.add then
+          dbg_trace s!"DBG[279]: Environment.lean:55 (after dbg_trace s!DBG[261]: Environment.lean:5…)"
         checkNoMVarNoFVar env v.name v.value
         let valType ← TypeChecker.check v.value v.levelParams
         if !(← TypeChecker.isDefEqCheckTypes' 28 v.levelParams valType v.type) then
@@ -57,7 +63,7 @@ def addTheorem (env : Kernel.Environment) (v : TheoremVal) (check := true) :
     M.run env env' (safety := .safe) (lctx := {}) do
       if !(← isProp v.type) then
         throw <| .thmTypeIsNotProp env v.name v.type
-      checkConstantVal env v.toConstantVal
+      checkConstantVal 4 env v.toConstantVal
       checkNoMVarNoFVar env v.name v.value
       let valType ← TypeChecker.check v.value v.levelParams
       if !(← TypeChecker.isDefEqCheckTypes' 29 v.levelParams valType v.type) then
@@ -68,7 +74,7 @@ def addOpaque (env : Kernel.Environment) (v : OpaqueVal) (check := true) :
     EIO KernelException Kernel.Environment := do
   if check then
     M.run env env' (safety := .safe) (lctx := {}) do
-      checkConstantVal env v.toConstantVal
+      checkConstantVal 5 env v.toConstantVal
       let valType ← TypeChecker.check v.value v.levelParams
       if !(← TypeChecker.isDefEqCheckTypes' 30 v.levelParams valType v.type) then
         throw <| .declTypeMismatch env (.opaqueDecl v) valType
@@ -85,7 +91,7 @@ def addMutual (env : Kernel.Environment) (vs : List DefinitionVal) (check := tru
         if v.safety != v₀.safety then
           throw <| .other
             "invalid mutual definition, declarations must have the same safety annotation"
-        checkConstantVal env v.toConstantVal
+        checkConstantVal 6 env v.toConstantVal
   let mut newEnv := env
   for v in vs do
     newEnv := add newEnv (.defnInfo v)

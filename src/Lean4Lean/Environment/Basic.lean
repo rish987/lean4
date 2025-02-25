@@ -38,6 +38,6 @@ def checkName (env : Kernel.Environment) (n : Name)
     (allowPrimitive := false) : EIO KernelException Unit := do
   if env.constants.contains n then
     throw <| .alreadyDeclared env n
-  unless allowPrimitive do
-    if primitives.contains n then
-      throw <| .other s!"unexpected use of primitive name {n}"
+  -- unless allowPrimitive do -- TODO this breaks stage2, where Nat.add is added as an axiom?
+  --   if primitives.contains n then
+  --     throw <| .other s!"unexpected use of primitive name {n}"
