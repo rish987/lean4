@@ -2113,6 +2113,29 @@ def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
     | .inr e =>
       throwKernelException e
 
+def instantiateLDecl (l : LocalDecl) : MetaM LocalDecl := do
+  match l with
+  | .cdecl idx id n t bi k =>
+    let t ← instantiateMVars t
+    -- if t.hasExprMVar then
+    --   return none
+    return .cdecl idx id n t bi k
+  | .ldecl idx id n t v nd k =>
+    let t ← instantiateMVars t
+    -- if t.hasExprMVar then
+    --   return none
+    let v ← instantiateMVars v
+    -- if v.hasExprMVar then
+    --   return none
+    return .ldecl idx id n t v nd k
+
+def instantiateLCtx : MetaM LocalContext := do
+  let mut newLctx := default
+  for decl in (← read).lctx do
+    let instDecl ← instantiateLDecl decl -- | return none
+    newLctx := newLctx.addDecl instDecl
+  return newLctx
+
 @[export lean_is_expr_def_eq]
 partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecDepth do
   withTraceNodeBefore `Meta.isDefEq (return m!"{t} =?= {s}") do
@@ -2170,11 +2193,19 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     let t ← instantiateMVars t
     let s ← instantiateMVars s
     if not t.hasExprMVar && not s.hasExprMVar then
+      dbg_trace s!"DBG[346]: ExprDefEq.lean:2195 (after if not t.hasExprMVar && not s.hasExprMVa…)"
+      let lctx ← instantiateLCtx
+      dbg_trace s!"DBG[347]: ExprDefEq.lean:2197 (after let lctx ← instantiateLCtx)"
       let mut lparams := []
       for (lmvarId, _) in (← getMCtx).lDepth do
         lparams := lmvarId.name :: lparams
       let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
-        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env (← read).lctx t s (← read).localDfEqs
+        -- let mut localDfEqs := []
+        -- for decl in lctx do
+        --   if let .app (.const ``localDfEq []) e := decl.type then
+        --     dbg_trace s!"DBG[339]: ExprDefEq.lean:2178 {e}"
+        --     localDfEqs := localDfEqs ++ [decl.toExpr]
+        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s-- localDfEqs
         pure ret
       if ret then return true
     let numPostponed ← getNumPostponed

@@ -574,13 +574,14 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
           isDefEqForall tBody sBody (subst.push (.fvar id))
       else
         isDefEqForall tBody sBody (subst.push default)
-    if let .app (.const ``localDfEq []) _ := sDom then
-      let sType := sType.getD (sDom.instantiateRev subst)
-      let localDfEq := sType.appArg!
-      withLocalDfEq localDfEq do
-        cont
-    else
-      cont
+    -- if let .app (.const ``localDfEq []) _ := sDom then
+    --   let sType := sType.getD (sDom.instantiateRev subst)
+    --   let localDfEq := sType.appArg!
+    --   withLocalDfEq localDfEq do
+    --     cont
+    -- else
+    --   cont
+    cont
   | t, s => isDefEqCheckTypes 20 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (l : Level) (T : Expr) (useHash := false) : RecM LBool := do
@@ -775,8 +776,13 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   let mut options := default
   options := options.insert `trace.Meta.isDefEq (.ofBool true)
 
-  let localDfEqs := (← readThe Context).localDfEqs
+  let mut localDfEqs := []
+  for decl in (← readThe Context).lctx do
+    if let .app (.const ``localDfEq []) _ := decl.type then
+      localDfEqs := localDfEqs ++ [decl.toExpr]
+  -- let localDfEqs := (← readThe Context).localDfEqs
   if localDfEqs.length > 0 then
+    dbg_trace s!"DBG[348]: TypeChecker.lean:784: localDfEqs={localDfEqs}"
     dbg_trace s!"DBG[305]: TypeChecker.lean:779 {t}, {s}"
 
   -- FIXME the below interferes with a kernel optimization
@@ -802,13 +808,19 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
         for lem in candidates do
           let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
           try
+            if localDfEqs.length > 0 then
+              dbg_trace s!"DBG[350]: TypeChecker.lean:812 {lem}, {← Meta.inferType lem}"
             let gs ← eqMvar.mvarId!.apply lem
+            if localDfEqs.length > 0 then
+              dbg_trace s!"DBG[351]: TypeChecker.lean:816 {lem}"
             if gs.length == 0 then
               return some (← instantiateMVars eqMvar)
             -- let gsExprs ← gs.mapM fun g => do
             --   let d ← g.getDecl
             --   pure d.type
           catch _ =>
+            if localDfEqs.length > 0 then
+              dbg_trace s!"DBG[352]: TypeChecker.lean:816 {lem}"
             pure ()
         return none
     ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})

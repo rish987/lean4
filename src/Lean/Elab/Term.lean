@@ -1117,11 +1117,13 @@ def mkCoe (expectedType : Expr) (e : Expr) (f? : Option Expr := none) (errorMsgH
       if let some mkImmedErrorMsg := mkImmedErrorMsg? then
         throwError (← mkImmedErrorMsg msg expectedType e)
       else
+        dbg_trace s!"DBG[343]: Term.lean:1119 (after else)"
         throwTypeMismatchError errorMsgHeader? expectedType (← inferType e) e f? msg
     | _            =>
       if let some mkImmedErrorMsg := mkImmedErrorMsg? then
         throwError (← mkImmedErrorMsg none expectedType e)
       else
+        dbg_trace s!"DBG[344]: Term.lean:1125 (after else)"
         throwTypeMismatchError errorMsgHeader? expectedType (← inferType e) e f?
 
 def mkCoeWithErrorMsgs (expectedType : Expr) (e : Expr)
@@ -1137,9 +1139,11 @@ Argument `f?` is used only for generating error messages when inserting coercion
 def ensureHasType (expectedType? : Option Expr) (e : Expr)
     (errorMsgHeader? : Option String := none) (f? : Option Expr := none) : TermElabM Expr := do
   let some expectedType := expectedType? | return e
-  if (← isDefEq (← inferType e) expectedType) then
+  let eT ← inferType e
+  if (← isDefEq eT expectedType) then
     return e
   else
+    dbg_trace s!"DBG[345]: Term.lean:1146 {eT}, {expectedType}"
     mkCoe expectedType e f? errorMsgHeader?
 
 def ensureHasTypeWithErrorMsgs (expectedType? : Option Expr) (e : Expr)

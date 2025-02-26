@@ -450,7 +450,9 @@ private def elabFunValues (headers : Array DefViewElabHeader) (vars : Array Expr
             (mkInfoOnError := (pure <| mkBodyInfo valStx none))
             do
               -- synthesize mvars here to force the top-level tactic block (if any) to run
+              dbg_trace s!"DBG[340]: MutualDef.lean:452 {type}"
               let val ← elabTermEnsuringType valStx type <* synthesizeSyntheticMVarsNoPostponing
+              dbg_trace s!"DBG[341]: MutualDef.lean:454 (after let val ← elabTermEnsuringType valStx …)"
               -- NOTE: without this `instantiatedMVars`, `mkLambdaFVars` may leave around a redex that
               -- leads to more section variables being included than necessary
               instantiateMVarsProfiling val
