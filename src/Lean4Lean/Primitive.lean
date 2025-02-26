@@ -121,7 +121,7 @@ def checkPrimitiveInductive (env : Kernel.Environment) (env' : Lean.Environment)
     let [⟨``String.mk,
       .forallE _ (.app (.const ``List [.zero]) (.const ``Char [])) (.const ``String []) _
     ⟩] := type.ctors | fail
-    M.run env env' (safety := .safe) (lctx := {}) do
+    M.run env env' (safety := .safe) (lctx := {}) (localDfEqs := []) do
       -- We need the following definitions for `strLitToConstructor` to work:
       -- Nat : Type (this is primitive so checking for existence suffices)
       let nat := .const ``Nat []

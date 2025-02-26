@@ -337,6 +337,14 @@ private partial def isDefEqArgs (f : Expr) (args₁ args₂ : Array Expr) : Meta
       let fvarType := fvarDecl.type
       let d₂       := ds₂[i]!
       if (← Meta.isExprDefEqAux fvarType d₂) then
+        let cont := do
+          if let .app (.const ``localDfEq []) e := d₂ then
+            withLocalDfEq (← instantiateMVars e) (loop (i+1))
+          else
+            loop (i+1)
+        match (← isClass? fvarType) with
+        | some className => withNewLocalInstance className fvar <| cont
+        | none           => cont
         match (← isClass? fvarType) with
         | some className => withNewLocalInstance className fvar <| loop (i+1)
         | none           => loop (i+1)
@@ -2166,8 +2174,8 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
       for (lmvarId, _) in (← getMCtx).lDepth do
         lparams := lmvarId.name :: lparams
       let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
-          let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env (← read).lctx t s
-          pure ret
+        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env (← read).lctx t s (← read).localDfEqs
+        pure ret
       if ret then return true
     let numPostponed ← getNumPostponed
     let k ← mkCacheKey t s

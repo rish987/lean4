@@ -23,6 +23,7 @@ structure TypeChecker.State where
 structure TypeChecker.Context where
   env : Kernel.Environment
   env' : Environment
+  localDfEqs : List Expr := []
   lctx : LocalContext := {}
   safety : DefinitionSafety := .safe
   lparams : List Name := []
@@ -32,8 +33,8 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| EIO KernelException
 
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
-    (x : M α) : EIO KernelException α :=
-  x { env, env', safety, lctx } |>.run' {}
+    (x : M α) (localDfEqs : List Expr := []) : EIO KernelException α :=
+  x { env, env', safety, lctx, localDfEqs} |>.run' {}
 
 -- instance : MonadEnv M where
 --   getEnv := return (← read).env
@@ -70,6 +71,9 @@ def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecM Expr := fun m =>
 
 @[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
+
+@[inline] def withLocalDfEq [MonadWithReaderOf Context m] (e : Expr) (x : m α) : m α :=
+  withReader (fun c => {c with localDfEqs := c.localDfEqs ++ [e]}) x
 
 def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
   if e.isSort then return e
@@ -557,18 +561,26 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
   | .forallE _ tDom tBody _, .forallE name sDom sBody bi => do
     let sType ← if tDom != sDom then
-      let sType := sDom.instantiateRev subst
-      let tType := tDom.instantiateRev subst
-      if !(← isDefEqCheckTypes 19 tType sType) then return false
-      pure (some sType)
-    else pure none
-    if tBody.hasLooseBVars || sBody.hasLooseBVars then
+        let sType := sDom.instantiateRev subst
+        let tType := tDom.instantiateRev subst
+        if !(← isDefEqCheckTypes 19 tType sType) then return false
+        pure (some sType)
+      else pure none
+    let cont := do
+      if tBody.hasLooseBVars || sBody.hasLooseBVars then
+        let sType := sType.getD (sDom.instantiateRev subst)
+        let id := ⟨← mkFreshId⟩
+        withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
+          isDefEqForall tBody sBody (subst.push (.fvar id))
+      else
+        isDefEqForall tBody sBody (subst.push default)
+    if let .app (.const ``localDfEq []) _ := sDom then
       let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
-      withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
-        isDefEqForall tBody sBody (subst.push (.fvar id))
+      let localDfEq := sType.appArg!
+      withLocalDfEq localDfEq do
+        cont
     else
-      isDefEqForall tBody sBody (subst.push default)
+      cont
   | t, s => isDefEqCheckTypes 20 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (l : Level) (T : Expr) (useHash := false) : RecM LBool := do
@@ -763,6 +775,10 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   let mut options := default
   options := options.insert `trace.Meta.isDefEq (.ofBool true)
 
+  let localDfEqs := (← readThe Context).localDfEqs
+  if localDfEqs.length > 0 then
+    dbg_trace s!"DBG[305]: TypeChecker.lean:779 {t}, {s}"
+
   -- FIXME the below interferes with a kernel optimization
   -- where we have avoided δ-expansion up to this point;
   -- the `apply` tactic will δ-expand as necessary to perform unification
@@ -777,23 +793,24 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       -- TODO is this necessary?
       -- let mlparams ← mkFreshLevelMVars lparams.length
       -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
+      let env ← getEnv
+      let lemNames := [``prfIrrel].filter (env.contains ·)
+      let mut candidates ← lemNames.mapM (mkConstWithFreshMVarLevels ·)
+      candidates := candidates ++ localDfEqs
       withLCtx' (← read).lctx do
         -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
-        let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
-        let lem := ``prfIrrel
-        if (← getEnv).contains lem then
+        for lem in candidates do
+          let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
           try
-            let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
-            if gs.length > 0 then
-              return none
+            let gs ← eqMvar.mvarId!.apply lem
+            if gs.length == 0 then
+              return some (← instantiateMVars eqMvar)
             -- let gsExprs ← gs.mapM fun g => do
             --   let d ← g.getDecl
             --   pure d.type
-            pure $ .some (← instantiateMVars eqMvar)
           catch _ =>
-            pure none
-        else
-          pure none
+            pure ()
+        return none
     ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let prf? ← match ← toKernelException check with
   | .inl ((reqs, _), _) => pure reqs
@@ -851,6 +868,7 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     -- dbg_trace s!"DBG[207]: {r}"
     return r' == .true
 
+  -- TODO integrate directed exteqs into lazy delta reduction
   match ← lazyDeltaReduction tn sn l T with
   | .continue .. => unreachable!
   | .bool b => return b
@@ -944,6 +962,6 @@ def etaExpand (e : Expr) : M Expr :=
   loop #[] e
 
 @[export lean_kernel_is_def_eq_new]
-def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) : EIO Kernel.Exception Bool :=
-  M.run env.toKernelEnv env (lctx := lctx) (safety := DefinitionSafety.safe) do
+def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (localDfEqs : List Expr) : EIO Kernel.Exception Bool :=
+  M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) do
     TypeChecker.isDefEqCheckTypes' (500 + n) lps a b

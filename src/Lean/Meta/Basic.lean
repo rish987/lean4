@@ -488,6 +488,7 @@ structure Context where
    This is not a great solution, but a proper solution would require a more sophisticased caching mechanism.
   -/
   inTypeClassResolution : Bool := false
+  localDfEqs : List Expr := []
 
 /--
 The `MetaM` monad is a core component of Lean's metaprogramming framework, facilitating the
@@ -1782,6 +1783,9 @@ caller ensure the local instances are also properly updated.
 -/
 def withLCtx' (lctx : LocalContext) : n α → n α :=
   mapMetaM <| withReader (fun ctx => { ctx with lctx })
+
+def withLocalDfEq (e : Expr) : n α → n α :=
+  mapMetaM <| withReader (fun c => {c with localDfEqs := c.localDfEqs ++ [e]})
 
 /--
 Runs `k` in a local environment with the `fvarIds` erased.
