@@ -32,9 +32,9 @@
 -- #print K.k
 
 -- set_option diagnostics true in
--- theorem localDfEqEx (a b c : Nat) (h : localDfEq (a + b = c)) : a + b = c := @Eq.refl Nat (a + b)
-theorem localDfEqEx : (a b c : Nat) → (h : localDfEq (a + b = c)) → a + b = c :=
-  fun (a b c : Nat) (h : localDfEq (a + b = c)) => @Eq.refl Nat (a + b)
+theorem localDfEqEx (a b c d : Nat) (hb : localDfEq (b = 0)) (hc : localDfEq (c = a)) (h : localDfEq (b = 0 → c = a → a + b = c)) : a + b = c := @Eq.refl Nat c
+-- theorem localDfEqEx : (a b c : Nat) → (h : localDfEq (a + b = c)) → a + b = c :=
+--   fun (a b c : Nat) (h : localDfEq (a + b = c)) => @Eq.refl Nat (a + b)
 
   -- @k.rec b (fun b' x' k' => k' = K.mk b' x') (Eq.refl (@K.mk T b x))
 

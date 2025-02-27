@@ -489,6 +489,7 @@ structure Context where
   -/
   inTypeClassResolution : Bool := false
   localDfEqs : List Expr := []
+  fuel : Nat := 5
 
 /--
 The `MetaM` monad is a core component of Lean's metaprogramming framework, facilitating the

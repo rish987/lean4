@@ -25,6 +25,7 @@ structure TypeChecker.Context where
   env' : Environment
   localDfEqs : List Expr := []
   lctx : LocalContext := {}
+  fuel : Nat := 5
   safety : DefinitionSafety := .safe
   lparams : List Name := []
 
@@ -33,8 +34,8 @@ namespace TypeChecker
 abbrev M := ReaderT Context <| StateT State <| EIO KernelException
 
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {})
-    (x : M α) (localDfEqs : List Expr := []) : EIO KernelException α :=
-  x { env, env', safety, lctx, localDfEqs} |>.run' {}
+    (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : EIO KernelException α :=
+  x { env, env', safety, lctx, localDfEqs, fuel } |>.run' {}
 
 -- instance : MonadEnv M where
 --   getEnv := return (← read).env
@@ -762,6 +763,8 @@ def instantiateLevelParamsCtx (lctx : LocalContext) (paramNames : List Name) (lv
 
 open Lean.Meta in
 def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
+  if (← readThe Context).fuel == 0 then
+    return .undef
   -- let X ← inferType t
   -- let Y ← inferType s
   let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
@@ -781,9 +784,6 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
     if let .app (.const ``localDfEq []) _ := decl.type then
       localDfEqs := localDfEqs ++ [decl.toExpr]
   -- let localDfEqs := (← readThe Context).localDfEqs
-  if localDfEqs.length > 0 then
-    dbg_trace s!"DBG[348]: TypeChecker.lean:784: localDfEqs={localDfEqs}"
-    dbg_trace s!"DBG[305]: TypeChecker.lean:779 {t}, {s}"
 
   -- FIXME the below interferes with a kernel optimization
   -- where we have avoided δ-expansion up to this point;
@@ -800,42 +800,68 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       -- let mlparams ← mkFreshLevelMVars lparams.length
       -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
       let env ← getEnv
-      let lemNames := [``prfIrrel].filter (env.contains ·)
+      -- let lemNames := [``prfIrrel].filter (env.contains ·)
+      let lemNames := [].filter (env.contains ·)
       let mut candidates ← lemNames.mapM (mkConstWithFreshMVarLevels ·)
       candidates := candidates ++ localDfEqs
+      let condString := s!"{← ppExpr $ t} =?= {← ppExpr $ s}"
+      if localDfEqs.length = 3 then
+        dbg_trace s!"Trying to show {condString}"
       withLCtx' (← read).lctx do
         -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
         for lem in candidates do
           let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
           try
-            if localDfEqs.length > 0 then
-              dbg_trace s!"DBG[350]: TypeChecker.lean:812 {lem}, {← Meta.inferType lem}"
+            if localDfEqs.length = 3 then
+              dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
             let gs ← eqMvar.mvarId!.apply lem
-            if localDfEqs.length > 0 then
-              dbg_trace s!"DBG[351]: TypeChecker.lean:816 {lem}"
-            if gs.length == 0 then
-              return some (← instantiateMVars eqMvar)
+            if localDfEqs.length == 3 then
+              dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localDfEqs.mapM (do ppExpr $ ← Meta.inferType ·)}"
+            for g in gs do
+              try
+                if localDfEqs.length = 3 then
+                  dbg_trace s!"Trying reflection: {← ppExpr $ ← g.getType}"
+                g.refl
+                if localDfEqs.length = 3 then
+                  dbg_trace s!"Reflection OK: {← ppExpr $ ← g.getType}"
+              catch e =>
+                if localDfEqs.length = 3 then
+                  dbg_trace s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
+                throw e
+            if localDfEqs.length = 3 then
+              dbg_trace s!"Showing OK: {← ppExpr $ t} =?= {← ppExpr $ s}"
+            let ret ← instantiateMVars eqMvar
+            return some ret
+            -- if localDfEqs.length == 3 then
+            --   dbg_trace s!"DBG[356]: TypeChecker.lean:819 (after if localDfEqs.length == 3 then)"
+
             -- let gsExprs ← gs.mapM fun g => do
             --   let d ← g.getDecl
             --   pure d.type
           catch _ =>
-            if localDfEqs.length > 0 then
-              dbg_trace s!"DBG[352]: TypeChecker.lean:816 {lem}"
+            if localDfEqs.length = 3 then
+              dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
             pure ()
+        if localDfEqs.length = 3 then
+          dbg_trace s!"Showing FAIL: {← ppExpr $ t} =?= {← ppExpr $ s}"
         return none
-    ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+    ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let prf? ← match ← toKernelException check with
   | .inl ((reqs, _), _) => pure reqs
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
   if let some prf := prf? then
+    if prf.hasExprMVar then
+      throw $ .other "unexpected mvar found in extensional equality proof"
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on the elaborator
-    try
-      _ ← inferType prf (inferOnly := false)
-    catch e =>
-      throw e
+    -- try
+    dbg_trace s!"ExtEq checking: {prf}"
+    -- _ ← inferType prf (inferOnly := false)
+    dbg_trace s!"ExtEq OK: {prf}"
+    -- catch e =>
+    --   throw e
     return .true
 
   return .undef
@@ -869,8 +895,7 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
 
-  -- let r' ← isDefEqProofIrrel T
-  let r' ← isDefEqExt t s l T
+  let r' ← isDefEqProofIrrel T
 
   if r' != .undef then
     -- if r' == .true then
@@ -878,6 +903,10 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     -- for lem in (Lean.Meta.DfEq.dfEqExt.getState ((← readThe Context).env')) do
     --   dbg_trace s!"DBG[205]: TypeChecker.lean:545 {lem}"
     -- dbg_trace s!"DBG[207]: {r}"
+    return r' == .true
+
+  let r' ← isDefEqExt t s l T
+  if r' != .undef then
     return r' == .true
 
   -- TODO integrate directed exteqs into lazy delta reduction
@@ -974,6 +1003,6 @@ def etaExpand (e : Expr) : M Expr :=
   loop #[] e
 
 @[export lean_kernel_is_def_eq_new]
-def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (localDfEqs : List Expr) : EIO Kernel.Exception Bool :=
-  M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) do
+def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) : EIO Kernel.Exception Bool :=
+  M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) (fuel := fuel) do
     TypeChecker.isDefEqCheckTypes' (500 + n) lps a b

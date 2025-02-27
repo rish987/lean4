@@ -1693,13 +1693,13 @@ namespace Kernel
 -- We use `Lean.Environment` for ease of use; as this is a debugging function, we forgo a
 -- `Kernel.Environment` base variant
 @[extern "lean_kernel_is_def_eq_new"]
-opaque isDefEq (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (localDfEqs : List Expr) : EIO Kernel.Exception Bool
+opaque isDefEq (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) : EIO Kernel.Exception Bool
 
 -- TODO make localDfEqs mandatory
-def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (localDfEqs : List Expr := []) : EIO Kernel.Exception Bool := do
+def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr := []) : EIO Kernel.Exception Bool := do
   let result ←
     try
-      isDefEq 1 lps env lctx a b localDfEqs
+      isDefEq 1 lps env lctx a b fuel localDfEqs
     catch _ =>
       return false
   return result

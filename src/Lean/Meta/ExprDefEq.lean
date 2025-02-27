@@ -2192,10 +2192,8 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     -/
     let t ← instantiateMVars t
     let s ← instantiateMVars s
-    if not t.hasExprMVar && not s.hasExprMVar then
-      dbg_trace s!"DBG[346]: ExprDefEq.lean:2195 (after if not t.hasExprMVar && not s.hasExprMVa…)"
+    if not t.hasExprMVar && not s.hasExprMVar && (← read).fuel > 0 then
       let lctx ← instantiateLCtx
-      dbg_trace s!"DBG[347]: ExprDefEq.lean:2197 (after let lctx ← instantiateLCtx)"
       let mut lparams := []
       for (lmvarId, _) in (← getMCtx).lDepth do
         lparams := lmvarId.name :: lparams
@@ -2205,7 +2203,7 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
         --   if let .app (.const ``localDfEq []) e := decl.type then
         --     dbg_trace s!"DBG[339]: ExprDefEq.lean:2178 {e}"
         --     localDfEqs := localDfEqs ++ [decl.toExpr]
-        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s-- localDfEqs
+        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s ((← read).fuel - 1)-- localDfEqs
         pure ret
       if ret then return true
     let numPostponed ← getNumPostponed
