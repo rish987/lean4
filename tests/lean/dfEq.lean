@@ -1,4 +1,3 @@
--- import Lean.Meta.Tactic.DfEq
 --
 -- structure S (T : Type) (F : T → Type) where
 -- x : T
@@ -31,8 +30,14 @@
 --   rfl
 -- #print K.k
 
+@[dfeq]
+theorem thm : (x y z : Nat) → y = 0 → z = x → x + y = z := sorry
+
 -- set_option diagnostics true in
-theorem localDfEqEx (a b c d : Nat) (hb : localDfEq (b = 0)) (hc : localDfEq (c = a)) (h : localDfEq (b = 0 → c = a → a + b = c)) : a + b = c := @Eq.refl Nat c
+-- theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) (h : (x y z : Nat) → y = 0 → z = x → x + y ≡ z) : c = a + b := rfl
+theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : b = 0 := rfl
+-- set_option pp.explicit true in
+-- #print localDfEqEx
 -- theorem localDfEqEx : (a b c : Nat) → (h : localDfEq (a + b = c)) → a + b = c :=
 --   fun (a b c : Nat) (h : localDfEq (a + b = c)) => @Eq.refl Nat (a + b)
 

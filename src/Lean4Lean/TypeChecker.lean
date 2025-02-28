@@ -772,6 +772,7 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   -- let X ← inferType t
   -- let Y ← inferType s
   let tEqs := mkAppN (.const `Eq [l]) #[T, t, s]
+  let sEqt := mkAppN (.const `Eq [l]) #[T, s, t]
   -- try
   --   _ ← inferType tEqs (inferOnly := false)
   --   if not (← isDefEqCheckTypes 0 X Y) then
@@ -785,7 +786,7 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
 
   let mut localDfEqs := []
   for decl in (← readThe Context).lctx do
-    if let .app (.const ``localDfEq []) _ := decl.type then
+    if let .app (.const ``localDfEq []) _ := decl.type.getForallBody then
       localDfEqs := localDfEqs ++ [decl.toExpr]
   -- let localDfEqs := (← readThe Context).localDfEqs
 
@@ -805,22 +806,24 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
       let env ← getEnv
       -- let lemNames := [``prfIrrel].filter (env.contains ·)
-      let lemNames := [].filter (env.contains ·)
+      let lemNames := DfEq.dfEqExt.getState env
       let mut candidates ← lemNames.mapM (mkConstWithFreshMVarLevels ·)
       candidates := candidates ++ localDfEqs
-      let condString := s!"{← ppExpr $ t} =?= {← ppExpr $ s}"
-      if localDfEqs.length == 3 then
-        dbg_trace s!"Trying to show {condString}"
+      -- let condString := s!"{← ppExpr $ t} =?= {← ppExpr $ s}"
+      -- if localDfEqs.length == 3 then
+      --   dbg_trace s!"Trying to show {condString}"
       withLCtx' (← read).lctx do
         -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
-        for lem in candidates do
-          let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
+        let tEqsMvar ← Lean.Meta.mkFreshExprMVar tEqs
+        let sEqtMvar ← Lean.Meta.mkFreshExprMVar sEqt
+        let tryExtEq lem eqMvar := do
           try
             -- if localDfEqs.length = 3 then
             --   dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-            let r ← eqMvar.mvarId!.rewrite tEqs lem
-            let mainGoal ← eqMvar.mvarId!.replaceTargetEq r.eNew r.eqProof
-            let gs := mainGoal :: r.mvarIds
+            let gs ← eqMvar.mvarId!.apply lem
+            -- let r ← eqMvar.mvarId!.rewrite tEqs lem
+            -- let mainGoal ← eqMvar.mvarId!.replaceTargetEq r.eNew r.eqProof
+            -- let gs := mainGoal :: r.mvarIds
             -- if localDfEqs.length == 3 then
             --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localDfEqs.mapM (do ppExpr $ ← Meta.inferType ·)}"
             for g in gs do
@@ -834,8 +837,8 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
                 -- if localDfEqs.length = 3 then
                 --   dbg_trace s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
                 throw e
-            if localDfEqs.length = 3 then
-              dbg_trace s!"Showing OK: {← ppExpr $ t} =?= {← ppExpr $ s}"
+            -- if localDfEqs.length = 3 then
+            --   dbg_trace s!"Showing OK: {← ppExpr $ t} =?= {← ppExpr $ s}"
             let ret ← instantiateMVars eqMvar
             return some ret
             -- if localDfEqs.length == 3 then
@@ -847,9 +850,16 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
           catch _ =>
             -- if localDfEqs.length = 3 then
             --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-            pure ()
-        if localDfEqs.length = 3 then
-          dbg_trace s!"Showing FAIL: {← ppExpr $ t} =?= {← ppExpr $ s}"
+            pure none
+        for lem in candidates do
+          -- for eqMvar in [tEqsMvar, sEqtMvar] do
+          if let .some prf ← tryExtEq lem tEqsMvar then
+            return some prf
+          if let .some prf ← tryExtEq lem sEqtMvar then
+            let symProof := Lean.mkAppN (.const ``Eq.symm [l]) #[T, s, t, prf]
+            return some symProof
+        -- if localDfEqs.length = 3 then
+        --   dbg_trace s!"Showing FAIL: {← ppExpr $ t} =?= {← ppExpr $ s}"
         return none
     ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let prf? ← match ← toKernelException check with
