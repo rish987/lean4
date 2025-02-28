@@ -458,38 +458,58 @@ def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Excep
   | .error e I => .ok (.inr e) I
 
 open Lean.Meta in
-def reduceExt (e : Expr) (d : Level × Expr) : RecM (Option Expr) := do
+def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Option Expr) := do
   let (l, T) := d
-  let .const i _ := (← whnf T).getAppFn | return none
   -- let .inductInfo iInfo ← (← getKEnv).get i | return none
-  let .recInfo rInfo ← (← getKEnv).get (mkRecName i) | return none
-  if not rInfo.k then return none
 
   -- let lparams := (← readThe Context).lparams
   let mut options := default
   options := options.insert `trace.Meta.isDefEq (.ofBool true)
 
+  let mut localRws := []
+  for decl in (← readThe Context).lctx do
+    if let .app (.const ``localRw []) _ := decl.type.getForallBody then
+      localRws := localRws ++ [decl.toExpr]
+
   let check := (Lean.Meta.MetaM.run (do
+    let env ← getEnv
+    let lemNames := DfEq.rwExt.getState env
+    let mut candidates := (← lemNames.mapM (mkConstWithFreshMVarLevels ·)) ++ localRws
+    let condString := s!"{← ppExpr $ e} rewrites?"
+    if dbg then
+      dbg_trace s!"Trying to show {condString}"
     withLCtx' (← read).lctx do
       let sMvar ← Lean.Meta.mkFreshExprMVar T
       let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
       -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
       let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
-      let lem := .str i "_k"
-      if (← getEnv).contains lem then
+      let tryExtRw lem := do
         try
-          let gs ← eqMvar.mvarId!.apply (← mkConstWithFreshMVarLevels lem)
+          if dbg then
+            dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          let gs ← eqMvar.mvarId!.apply lem
+          if dbg then
+            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localRws.mapM (do ppExpr $ ← Meta.inferType ·)}"
+          -- TODO unassign eqMvar if any g.refl fails?
+          for g in gs do
+            try
+              g.refl
+            catch e =>
+              throw e
           if gs.length > 0 then
             return none
-          -- let gsExprs ← gs.mapM fun g => do
-          --   let d ← g.getDecl
-          --   pure d.type
           pure $ .some ((← instantiateMVars eqMvar), (← instantiateMVars sMvar))
         catch _ =>
+          if dbg then
+            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
           pure none
-      else
-        pure none
-    ) {lctx := (← readThe Context).lctx} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+      for lem in candidates do
+        if let .some prf ← tryExtRw lem then
+          return some prf
+      if dbg then
+        dbg_trace s!"Showing FAIL: {condString}"
+      return none
+    ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let ret? ← match ← toKernelException check with
   | .inl ((ret?, _), _) => pure ret?
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
@@ -804,8 +824,8 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       -- TODO is this necessary?
       -- let mlparams ← mkFreshLevelMVars lparams.length
       -- let mlctx := instantiateLevelParamsCtx (← read).lctx lparams mlparams
-      let env ← getEnv
       -- let lemNames := [``prfIrrel].filter (env.contains ·)
+      let env ← getEnv
       let lemNames := DfEq.dfEqExt.getState env
       let mut candidates ← lemNames.mapM (mkConstWithFreshMVarLevels ·)
       candidates := candidates ++ localDfEqs
@@ -827,6 +847,7 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
             -- if localDfEqs.length == 3 then
             --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localDfEqs.mapM (do ppExpr $ ← Meta.inferType ·)}"
             for g in gs do
+              -- TODO unassign eqMvar if any g.refl fails?
               try
                 -- if localDfEqs.length = 3 then
                 --   dbg_trace s!"Trying reflection: {← ppExpr $ ← g.getType}"
@@ -900,6 +921,24 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
     --     return true
 
 def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
+  let mut localRws := []
+  for decl in (← readThe Context).lctx do
+    if let .app (.const ``localRw []) _ := decl.type.getForallBody then
+      localRws := localRws ++ [decl.toExpr]
+  
+  let dbg := false
+    -- if localRws.length > 0 then
+    --   if t.isApp && s.isApp then
+    --     if let .const ``HAdd.hAdd _ := t.getAppFn then
+    --       if let .const ``Nat.succ _ := s.getAppFn then
+    --         true
+    --       else false
+    --     else false
+    --   else false
+    -- else false
+
+  -- if dbg then
+  --   dbg_trace s!"DBG[362]: TypeChecker.lean:474 {t}      {s}"
   let r ← quickIsDefEq t s l T (useHash := true)
   if r != .undef then return r == .true
 
@@ -937,6 +976,10 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r' ← isDefEqExt t s l T
   if r' != .undef then
     return r' == .true
+  let tn' := (← reduceExt tn (l, T) dbg).getD tn
+  let sn' := (← reduceExt sn (l, T) dbg).getD sn
+  if !(unsafe ptrEq tn' tn && ptrEq sn' sn) then
+    return ← isDefEqCore 90 tn' sn' l T
 
   -- TODO integrate directed exteqs into lazy delta reduction
   match ← lazyDeltaReduction tn sn l T with

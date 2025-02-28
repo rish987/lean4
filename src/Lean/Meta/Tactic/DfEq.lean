@@ -17,7 +17,6 @@ namespace Lean.Meta.DfEq
 
 open Lean Meta
 
--- /-- Environment extensions for `refl` lemmas -/
 initialize dfEqExt :
     SimpleScopedEnvExtension Name (List Name) ←
   registerSimpleScopedEnvExtension {
@@ -27,16 +26,37 @@ initialize dfEqExt :
 
 builtin_initialize registerBuiltinAttribute {
   name := `dfeq
-  descr := "definitional equality"
+  descr := "extensional definitional equality"
   add := fun decl _ kind => MetaM.run' do
     let declTy := (← getConstInfo decl).type
     let (_, _, targetTy) ← withReducible <| forallMetaTelescopeReducing declTy
     let fail := throwError
-      "@[dfeq] attribute only applies to lemmas proving x = x, got {declTy}"
+      "@[dfeq] attribute only applies to lemmas proving x = y, got {declTy}"
     let .app (.app rel lhs) rhs := targetTy | fail
     let .app (.const ``Eq [_]) _ := rel | fail
     -- unless ← withNewMCtxDepth <| isDefEq lhs rhs do fail
     dfEqExt.add decl kind
+}
+
+initialize rwExt :
+    SimpleScopedEnvExtension Name (List Name) ←
+  registerSimpleScopedEnvExtension {
+    addEntry := fun dt n => dt.insert n
+    initial := {}
+  }
+
+builtin_initialize registerBuiltinAttribute {
+  name := `rw
+  descr := "extensional rewrite rule"
+  add := fun decl _ kind => MetaM.run' do
+    let declTy := (← getConstInfo decl).type
+    let (_, _, targetTy) ← withReducible <| forallMetaTelescopeReducing declTy
+    let fail := throwError
+      "@[rw] attribute only applies to lemmas proving x = y, got {declTy}"
+    let .app (.app rel lhs) rhs := targetTy | fail
+    let .app (.const ``Eq [_]) _ := rel | fail
+    -- unless ← withNewMCtxDepth <| isDefEq lhs rhs do fail
+    rwExt.add decl kind
 }
 
 end Lean.Meta.DfEq

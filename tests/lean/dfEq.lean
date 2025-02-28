@@ -29,13 +29,25 @@
 --   cases k
 --   rfl
 -- #print K.k
+--
+inductive Vec : Nat → Type where
+| nil : Vec 0
+| cons {n : Nat} (v : Vec n) (x : Nat) : Vec (n + 1)
+
+@[rw]
+theorem addOneComm : 1 + n = Nat.succ n := sorry
+
+-- def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
+-- v.cons 1
+
+example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
 
 @[dfeq]
 theorem thm : (x y z : Nat) → y = 0 → z = x → x + y = z := sorry
 
 -- set_option diagnostics true in
 -- theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) (h : (x y z : Nat) → y = 0 → z = x → x + y ≡ z) : c = a + b := rfl
-theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : b = 0 := rfl
+theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
 -- set_option pp.explicit true in
 -- #print localDfEqEx
 -- theorem localDfEqEx : (a b c : Nat) → (h : localDfEq (a + b = c)) → a + b = c :=
