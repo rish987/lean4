@@ -6,6 +6,10 @@ import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 import Lean.Meta.Tactic.DfEq
+import Lean.Meta.Tactic.Rewrite
+import Lean.Meta.Tactic.Apply
+import Lean.Meta.Tactic.Replace
+import Lean.Meta.Tactic.Refl
 
 namespace Lean
 
@@ -805,28 +809,30 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
       let mut candidates ← lemNames.mapM (mkConstWithFreshMVarLevels ·)
       candidates := candidates ++ localDfEqs
       let condString := s!"{← ppExpr $ t} =?= {← ppExpr $ s}"
-      if localDfEqs.length = 3 then
+      if localDfEqs.length == 3 then
         dbg_trace s!"Trying to show {condString}"
       withLCtx' (← read).lctx do
         -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
         for lem in candidates do
           let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs)
           try
-            if localDfEqs.length = 3 then
-              dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-            let gs ← eqMvar.mvarId!.apply lem
-            if localDfEqs.length == 3 then
-              dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localDfEqs.mapM (do ppExpr $ ← Meta.inferType ·)}"
+            -- if localDfEqs.length = 3 then
+            --   dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+            let r ← eqMvar.mvarId!.rewrite tEqs lem
+            let mainGoal ← eqMvar.mvarId!.replaceTargetEq r.eNew r.eqProof
+            let gs := mainGoal :: r.mvarIds
+            -- if localDfEqs.length == 3 then
+            --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localDfEqs.mapM (do ppExpr $ ← Meta.inferType ·)}"
             for g in gs do
               try
-                if localDfEqs.length = 3 then
-                  dbg_trace s!"Trying reflection: {← ppExpr $ ← g.getType}"
+                -- if localDfEqs.length = 3 then
+                --   dbg_trace s!"Trying reflection: {← ppExpr $ ← g.getType}"
                 g.refl
-                if localDfEqs.length = 3 then
-                  dbg_trace s!"Reflection OK: {← ppExpr $ ← g.getType}"
+                -- if localDfEqs.length = 3 then
+                --   dbg_trace s!"Reflection OK: {← ppExpr $ ← g.getType}"
               catch e =>
-                if localDfEqs.length = 3 then
-                  dbg_trace s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
+                -- if localDfEqs.length = 3 then
+                --   dbg_trace s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
                 throw e
             if localDfEqs.length = 3 then
               dbg_trace s!"Showing OK: {← ppExpr $ t} =?= {← ppExpr $ s}"
@@ -839,8 +845,8 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
             --   let d ← g.getDecl
             --   pure d.type
           catch _ =>
-            if localDfEqs.length = 3 then
-              dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+            -- if localDfEqs.length = 3 then
+            --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
             pure ()
         if localDfEqs.length = 3 then
           dbg_trace s!"Showing FAIL: {← ppExpr $ t} =?= {← ppExpr $ s}"
@@ -857,9 +863,11 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on the elaborator
     -- try
-    dbg_trace s!"ExtEq checking: {prf}"
-    -- _ ← inferType prf (inferOnly := false)
-    dbg_trace s!"ExtEq OK: {prf}"
+    -- dbg_trace s!"ExtEq checking: {prf}"
+
+    _ ← inferType prf (inferOnly := false)
+
+    -- dbg_trace s!"ExtEq OK: {prf}"
     -- catch e =>
     --   throw e
     return .true
@@ -888,6 +896,17 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf t).isConstOf ``true then return true
 
+  -- let elimLocalDfEq e :=  do
+  --   if e.isApp then
+  --     if let .const ``localDfEq [] := e.appFn! then
+  --       whnfCore (unfoldDefinition (← getKEnv) e).get! (cheapProj := true)
+  --     else
+  --       pure e
+  --   else
+  --     pure e
+
+  -- let tn ← elimLocalDfEq $ ← whnfCore t (cheapProj := true)
+  -- let sn ← elimLocalDfEq $ ← whnfCore s (cheapProj := true)
   let tn ← whnfCore t (cheapProj := true)
   let sn ← whnfCore s (cheapProj := true)
 
