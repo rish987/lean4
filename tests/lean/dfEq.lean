@@ -35,19 +35,28 @@ inductive Vec : Nat → Type where
 | cons {n : Nat} (v : Vec n) (x : Nat) : Vec (n + 1)
 
 @[rw]
-theorem addOneComm : 1 + n = Nat.succ n := sorry
+theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
 
--- def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
--- v.cons 1
+@[rw]
+theorem zeroAddComm : Nat.zero + n = n := sorry
+
+-- @[rw] -- bad rule leading to non-termination
+-- theorem succComm : Nat.succ n = 1 + n := sorry
+
+def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
+v.cons 1
 
 example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
+-- example (x y : Nat) : (1 + y) + x = Nat.succ (y + x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
-@[dfeq]
-theorem thm : (x y z : Nat) → y = 0 → z = x → x + y = z := sorry
+-- (1 + y) + x --> succ (zero + y) + x
+-- 1 + y --> succ (zero + y)
 
--- set_option diagnostics true in
--- theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) (h : (x y z : Nat) → y = 0 → z = x → x + y ≡ z) : c = a + b := rfl
-theorem localDfEqEx (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
+-- @[dfeq]
+-- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
+
+-- example (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
+
 -- set_option pp.explicit true in
 -- #print localDfEqEx
 -- theorem localDfEqEx : (a b c : Nat) → (h : localDfEq (a + b = c)) → a + b = c :=
