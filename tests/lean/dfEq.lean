@@ -30,24 +30,26 @@
 --   rfl
 -- #print K.k
 --
-inductive Vec : Nat → Type where
-| nil : Vec 0
-| cons {n : Nat} (v : Vec n) (x : Nat) : Vec (n + 1)
+-- inductive Vec : Nat → Type where
+-- | nil : Vec 0
+-- | cons {n : Nat} (v : Vec n) (x : Nat) : Vec (n + 1)
 
 @[rw]
-theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
+theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
 
 @[rw]
-theorem zeroAddComm : Nat.zero + n = n := sorry
+theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 
 -- @[rw] -- bad rule leading to non-termination
 -- theorem succComm : Nat.succ n = 1 + n := sorry
+--
+-- def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
+-- v.cons 1
 
-def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
-v.cons 1
-
-example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
--- example (x y : Nat) : (1 + y) + x = Nat.succ (y + x) := rfl -- does not work, need some way to mark the first argument for eager expansion
+-- set_option trace.Meta.isDefEq true in
+-- example : Nat := 1
+-- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
+example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x
 -- 1 + y --> succ (zero + y)

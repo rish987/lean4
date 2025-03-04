@@ -151,7 +151,12 @@ private def reorderGoals (mvars : Array Expr) : ApplyNewGoals → MetaM (List MV
 
 /-- Custom `isDefEq` for the `apply` tactic -/
 private def isDefEqApply (cfg : ApplyConfig) (a b : Expr) : MetaM Bool := do
-  if cfg.approx then
+  if cfg.shallow then
+    if cfg.approx then
+      approxDefEq <| shallowDefEq <| isDefEqGuarded a b
+    else
+      shallowDefEq <| isDefEqGuarded a b
+  else if cfg.approx then
     approxDefEq <| isDefEqGuarded a b
   else
     isDefEqGuarded a b

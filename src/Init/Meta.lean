@@ -1385,6 +1385,7 @@ structure ApplyConfig where
   the `approxDefEq` combinator.
   -/
   approx : Bool := true
+  shallow : Bool := false
 
 namespace Rewrite
 

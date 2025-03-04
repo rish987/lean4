@@ -59,7 +59,7 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → M Bool
-  whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
+  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : M Expr
   whnf (e : Expr) (d : Option (Level × Expr)) : M Expr
   inferType (e : Expr) (inferOnly : Bool) : M Expr
 
@@ -310,26 +310,26 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     { s with inferTypeC := s.inferTypeC.insert e r }
   return r
 
-def whnfCore (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
-  fun m => m.whnfCore e cheapRec cheapProj
+def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr :=
+  fun m => m.whnfCore e l cheapRec cheapProj
 
-def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
+def reduceRecursor (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
   let env ← getKEnv
   if env.quotInit then
     if let some r ← quotReduceRec e (whnf) then
       return r
-  let whnf' e := if cheapRec then whnfCore e cheapRec cheapProj else whnf e
+  let whnf' e := if cheapRec then whnfCore e l cheapRec cheapProj else whnf e
   if let some r ← inductiveReduceRec env e whnf' inferType (isDefEqCheckTypes 16) then
     return r
   return none
 
-def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
+def whnfFVar (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) : RecM Expr := do
   if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.fvarId! then
-    return ← whnfCore v cheapRec cheapProj
+    return ← whnfCore v l cheapRec cheapProj
   return e
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore struct cheapRec cheapProj else whnf struct)
+  let mut c ← (if cheapProj then whnfCore struct none cheapRec cheapProj else whnf struct)
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
@@ -341,10 +341,10 @@ def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (O
 def isLetFVar (lctx : LocalContext) (fvar : FVarId) : Bool :=
   lctx.find? fvar matches some (.ldecl ..)
 
-def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr := do
+def whnfCoreNoExt' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr := do
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return e
-  | .mdata _ e => return ← whnfCore' e cheapRec cheapProj
+  | .mdata _ e => return ← whnfCoreNoExt' e l cheapRec cheapProj
   | .fvar id => if !isLetFVar (← getLCtx) id then return e
   | .app .. | .letE .. | .proj .. => pure ()
   if let some r := (← get).whnfCoreCache[e]? then
@@ -356,36 +356,120 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit ..
   | .mdata .. => unreachable!
-  | .fvar _ => return ← whnfFVar e cheapRec cheapProj
+  | .fvar _ => return ← whnfFVar e l cheapRec cheapProj
   | .app .. =>
     e.withAppRev fun f0 rargs => do
-    let f ← whnfCore f0 cheapRec cheapProj
+    let f ← whnfCore f0 none cheapRec cheapProj
     if let .lam _ _ body _ := f then
       let rec loop m (f : Expr) : RecM Expr :=
         let cont2 := do
           let r := f.instantiateRange (rargs.size - m) rargs.size rargs
           let r := r.mkAppRevRange 0 (rargs.size - m) rargs
-          save <|← whnfCore r cheapRec cheapProj
+          save <|← whnfCore r l cheapRec cheapProj
         if let .lam _ _ body _ := f then
           if m < rargs.size then loop (m + 1) body
           else cont2
         else cont2
       loop 1 body
     else if f == f0 then
-      if let some r ← reduceRecursor e cheapRec cheapProj then
-        whnfCore r cheapRec cheapProj
+      if let some r ← reduceRecursor e l cheapRec cheapProj then
+        whnfCore r l cheapRec cheapProj
       else
         pure e
     else
       let r := f.mkAppRevRange 0 rargs.size rargs
-      save <|← whnfCore r cheapRec cheapProj
+      save <|← whnfCore r l cheapRec cheapProj
   | .letE _ _ val body _ =>
-    save <|← whnfCore (body.instantiate1 val) cheapRec cheapProj
+    save <|← whnfCore (body.instantiate1 val) l cheapRec cheapProj
   | .proj _ idx s =>
     if let some m ← reduceProj idx s cheapRec cheapProj then
-      save <|← whnfCore m cheapRec cheapProj
+      save <|← whnfCore m l cheapRec cheapProj
     else
       save e
+
+def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
+
+open Lean.Meta in
+def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Option Expr) := do
+  let (l, T) := d
+  -- let .inductInfo iInfo ← (← getKEnv).get i | return none
+
+  -- let lparams := (← readThe Context).lparams
+  let mut options := default
+  options := options.insert `trace.Meta.isDefEq (.ofBool true)
+
+  let mut localRws := []
+  for decl in (← readThe Context).lctx do
+    if let .app (.const ``localRw []) _ := decl.type.getForallBody then
+      localRws := localRws ++ [decl.toExpr]
+
+  let check := (Lean.Meta.MetaM.run (do
+    let env ← getEnv
+    let lemNames := DfEq.rwExt.getState env
+    let mut candidates := (← lemNames.mapM (mkConstWithFreshMVarLevels ·)) ++ localRws
+    let condString := s!"{← ppExpr $ e} rewrites? ({e}) {(← readThe Core.Context).options}"
+    if dbg then
+      dbg_trace s!"Trying to show {condString}"
+    withLCtx' (← read).lctx do
+      let sMvar ← Lean.Meta.mkFreshExprMVar T
+      let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
+      -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
+      let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
+      let tryExtRw lem := do
+        try
+          if dbg then
+            dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          let gs ← eqMvar.mvarId!.apply lem (cfg := {approx := false})
+          if dbg then
+            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localRws.mapM (do ppExpr $ ← Meta.inferType ·)}"
+          -- TODO unassign eqMvar if any g.refl fails?
+          for g in gs do
+            try
+              g.refl
+            catch e =>
+              throw e
+          if gs.length > 0 then
+            return none
+          pure $ .some ((← instantiateMVars eqMvar), (← instantiateMVars sMvar))
+        catch _ =>
+          if dbg then
+            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          pure none
+      for lem in candidates do
+        if let .some prf ← tryExtRw lem then
+          return some prf
+      if dbg then
+        dbg_trace s!"Showing FAIL: {condString}"
+        if dbg then printTraces
+      return none
+    ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
+  let ret? ← match ← toKernelException check with
+  | .inl ((ret?, _), _) => pure ret?
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
+  if let some (prf, s) := ret? then
+    -- check that the proof returned by unification is well-typed with the kernel itself,
+    -- to minimize the trust that we place on the elaborator
+    if s == e then return none
+    try
+      _ ← inferType prf (inferOnly := false)
+    catch e =>
+      throw e
+    return s
+
+  return none
+
+def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr := do
+  let l ← l.getDM (getTypeInfo e)
+  let e' ← whnfCoreNoExt' e l cheapRec cheapProj
+  if let .some e' ← reduceExt e' l then
+    whnfCore e' l cheapRec cheapProj
+  else
+    pure e'
 
 def isDelta (env : Kernel.Environment) (e : Expr) : Option ConstantInfo := do
   if let .const c _ := e.getAppFn then
@@ -452,117 +536,35 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
   return none
 
-def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
-  match m x with
-  | .ok s I => .ok (.inl s) I
-  | .error e I => .ok (.inr e) I
-
-open Lean.Meta in
-def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Option Expr) := do
-  let (l, T) := d
-  -- let .inductInfo iInfo ← (← getKEnv).get i | return none
-
-  -- let lparams := (← readThe Context).lparams
-  let mut options := default
-  options := options.insert `trace.Meta.isDefEq (.ofBool true)
-
-  let mut localRws := []
-  for decl in (← readThe Context).lctx do
-    if let .app (.const ``localRw []) _ := decl.type.getForallBody then
-      localRws := localRws ++ [decl.toExpr]
-
-  let check := (Lean.Meta.MetaM.run (do
-    let env ← getEnv
-    let lemNames := DfEq.rwExt.getState env
-    let mut candidates := (← lemNames.mapM (mkConstWithFreshMVarLevels ·)) ++ localRws
-    let condString := s!"{← ppExpr $ e} rewrites?"
-    if dbg then
-      dbg_trace s!"Trying to show {condString}"
-    withLCtx' (← read).lctx do
-      let sMvar ← Lean.Meta.mkFreshExprMVar T
-      let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
-      -- let eqMvar ← Lean.Meta.mkFreshExprMVar (tEqs.instantiateLevelParams lparams mlparams)
-      let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
-      let tryExtRw lem := do
-        try
-          if dbg then
-            dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          let gs ← eqMvar.mvarId!.apply lem
-          if dbg then
-            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localRws.mapM (do ppExpr $ ← Meta.inferType ·)}"
-          -- TODO unassign eqMvar if any g.refl fails?
-          for g in gs do
-            try
-              g.refl
-            catch e =>
-              throw e
-          if gs.length > 0 then
-            return none
-          pure $ .some ((← instantiateMVars eqMvar), (← instantiateMVars sMvar))
-        catch _ =>
-          if dbg then
-            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          pure none
-      for lem in candidates do
-        if let .some prf ← tryExtRw lem then
-          return some prf
-      if dbg then
-        dbg_trace s!"Showing FAIL: {condString}"
-      return none
-    ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
-  let ret? ← match ← toKernelException check with
-  | .inl ((ret?, _), _) => pure ret?
-  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
-  | .inr (.error _ d) => throw $ .other (← d.toString)
-
-  if let some (prf, s) := ret? then
-    -- check that the proof returned by unification is well-typed with the kernel itself,
-    -- to minimize the trust that we place on the elaborator
-    if s == e then return none
-    try
-      _ ← inferType prf (inferOnly := false)
-    catch e =>
-      throw e
-    return s
-
-  return none
-
-def whnf' (e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
-  let l ← l.getDM (getTypeInfo e)
+def whnf' (_e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
+  let e ← whnfCore _e l
   -- Do not cache easy cases
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
   | .mdata _ e => return ← whnf e l
   | _ => pure ()
 
-  if let .some e' ← reduceExt e l then
-    whnf e' l
-  else
-    match e with
-    | .fvar id =>
-      if !isLetFVar (← getLCtx) id then
-        let e := (← reduceExt e l).getD e
-        return e
-    | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
-    | _ => unreachable!
-    -- check cache
-    if let some r := (← get).whnfCache[e]? then
-      return r
-    let rec loop t
-    | 0 => throw .deterministicTimeout
-    | fuel+1 => do
-      let env ← getKEnv
-      let t ← whnfCore' t
-      if let some t ← reduceNative env t then return t
-      if let some t ← reduceNat t then return t
-      if let .some t' ← reduceExt t l then
-        whnf t' l
-      else
-        let some t := unfoldDefinition env t | return t
-        loop t fuel
-    let r ← loop e 1000
-    modify fun s => { s with whnfCache := s.whnfCache.insert e r }
+  match e with
+  | .fvar id =>
+    if !isLetFVar (← getLCtx) id then
+      return e
+  | .lam .. | .app .. | .const .. | .letE .. | .proj .. => pure ()
+  | _ => unreachable!
+  -- check cache
+  if let some r := (← get).whnfCache[e]? then
     return r
+  let rec loop t
+  | 0 => throw .deterministicTimeout
+  | fuel+1 => do
+    let env ← getKEnv
+    let t ← whnfCore' t l
+    if let some t ← reduceNative env t then return t
+    if let some t ← reduceNat t then return t
+    let some t := unfoldDefinition env t | return t
+    loop t fuel
+  let r ← loop e 1000
+  modify fun s => { s with whnfCache := s.whnfCache.insert e r }
+  return r
 
 def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
   match t, s with
@@ -680,10 +682,10 @@ def cacheFailure (t s : Expr) : M Unit := do
   let k := if t.hash ≤ s.hash then (t, s) else (s, t)
   modify fun st => { st with failure := st.failure.insert k }
 
-def tryUnfoldProjApp (e : Expr) : RecM (Option Expr) := do
+def tryUnfoldProjApp (e : Expr) (l : Level × Expr) : RecM (Option Expr) := do
   let f := e.getAppFn
   if !f.isProj then return none
-  let e' ← whnfCore e
+  let e' ← whnfCore e l
   return if e' != e then e' else none
 
 def lazyDeltaReductionStep (tn sn : Expr) (l : Level) (T : Expr) : RecM ReductionStatus := do
@@ -697,12 +699,12 @@ def lazyDeltaReductionStep (tn sn : Expr) (l : Level) (T : Expr) : RecM Reductio
   match isDelta env tn, isDelta env sn with
   | none, none => return .unknown tn sn
   | some _, none =>
-    if let some sn' ← tryUnfoldProjApp sn then
+    if let some sn' ← tryUnfoldProjApp sn (l, T) then
       cont tn sn'
     else
       cont (← delta tn) sn
   | none, some _ =>
-    if let some tn' ← tryUnfoldProjApp tn then
+    if let some tn' ← tryUnfoldProjApp tn (l, T) then
       cont tn' sn
     else
       cont tn (← delta sn)
@@ -926,7 +928,13 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     if let .app (.const ``localRw []) _ := decl.type.getForallBody then
       localRws := localRws ++ [decl.toExpr]
   
-  let dbg := false
+  let mut dbg := false
+  if let (.app (.app (.const ``Nat.add []) (.app (.app (.const ``Nat.add []) _) (.fvar _))) (.fvar _)) := t then
+    if let (.app (.const ``Nat.succ []) (.app (.app (.const ``Nat.add []) (.fvar _)) (.fvar _))) := s then
+      dbg := true
+  -- if let .app (.app (.const `Nat.add []) z) y := t then
+  --   sorry
+
     -- if localRws.length > 0 then
     --   if t.isApp && s.isApp then
     --     if let .const ``HAdd.hAdd _ := t.getAppFn then
@@ -956,8 +964,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
 
   -- let tn ← elimLocalDfEq $ ← whnfCore t (cheapProj := true)
   -- let sn ← elimLocalDfEq $ ← whnfCore s (cheapProj := true)
-  let tn ← whnfCore t (cheapProj := true)
-  let sn ← whnfCore s (cheapProj := true)
+  let tn ← whnfCore t (l, T) (cheapProj := true)
+  let sn ← whnfCore s (l, T) (cheapProj := true)
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn l T
@@ -976,10 +984,6 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r' ← isDefEqExt t s l T
   if r' != .undef then
     return r' == .true
-  let tn' := (← reduceExt tn (l, T) dbg).getD tn
-  let sn' := (← reduceExt sn (l, T) dbg).getD sn
-  if !(unsafe ptrEq tn' tn && ptrEq sn' sn) then
-    return ← isDefEqCore 90 tn' sn' l T
 
   -- TODO integrate directed exteqs into lazy delta reduction
   match ← lazyDeltaReduction tn sn l T with
@@ -995,8 +999,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     if ti == si then if ← isDefEqCheckTypes 25 te se then return true
   | _, _ => pure ()
 
-  let tnn ← whnfCore tn
-  let snn ← whnfCore sn
+  let tnn ← whnfCore tn (l, T)
+  let snn ← whnfCore sn (l, T)
   if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
     return ← isDefEqCore 14 tnn snn l T
 
@@ -1015,12 +1019,12 @@ open Inner
 def Methods.withFuel : Nat → Methods
   | 0 =>
     { isDefEqCore := fun _ _ _ _ _ => throw .deepRecursion
-      whnfCore := fun _ _ _ => throw .deepRecursion
+      whnfCore := fun _ _ _ _ => throw .deepRecursion
       whnf := fun _ _ => throw .deepRecursion
       inferType := fun _ _ => throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun _n t s l T => isDefEqCore' _n t s l T (withFuel n)
-      whnfCore := fun e r p => whnfCore' e r p (withFuel n)
+      whnfCore := fun e l r p => whnfCore' e l r p (withFuel n)
       whnf := fun e l => whnf' e l (withFuel n)
       inferType := fun e i => inferType' e i (withFuel n) }
 

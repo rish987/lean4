@@ -180,6 +180,7 @@ structure Config where
   in `e`.
   -/
   zetaUnused : Bool := true
+  shallow : Bool := false
   deriving Inhabited, Repr
 
 /-- Convert `isDefEq` and `WHNF` relevant parts into a key for caching results -/
@@ -1837,9 +1838,15 @@ def withoutModifyingMCtx : n α → n α :=
 @[inline] private def approxDefEqImp (x : MetaM α) : MetaM α :=
   withConfig (fun config => { config with foApprox := true, ctxApprox := true, quasiPatternApprox := true}) x
 
+@[inline] private def shallowDefEqImp (x : MetaM α) : MetaM α :=
+  withConfig (fun config => { config with shallow := true }) x
+
 /-- Execute `x` using approximate unification: `foApprox`, `ctxApprox` and `quasiPatternApprox`.  -/
 @[inline] def approxDefEq : n α → n α :=
   mapMetaM approxDefEqImp
+
+@[inline] def shallowDefEq : n α → n α :=
+  mapMetaM shallowDefEqImp
 
 @[inline] private def fullApproxDefEqImp (x : MetaM α) : MetaM α :=
   withConfig (fun config => { config with foApprox := true, ctxApprox := true, quasiPatternApprox := true, constApprox := true }) x
@@ -2029,6 +2036,7 @@ private def mkLevelErrorMessageCore (header : String) (entry : PostponedEntry) :
   match entry.ctx? with
   | none =>
     return m!"{header}{indentD m!"{entry.lhs} =?= {entry.rhs}"}"
+    -- "
   | some ctx =>
     withLCtx ctx.lctx ctx.localInstances do
       let s   := entry.lhs.collectMVars entry.rhs.collectMVars
@@ -2040,6 +2048,7 @@ private def mkLevelErrorMessageCore (header : String) (entry : PostponedEntry) :
         addMessageContext m!"{header}{indentD m!"{entry.lhs} =?= {entry.rhs}"}\nwhile trying to unify{indentD m!"{lhs} : {← inferType lhs}"}\nwith{indentD m!"{rhs} : {← inferType rhs}"}"
       catch _ =>
         addMessageContext m!"{header}{indentD m!"{entry.lhs} =?= {entry.rhs}"}\nwhile trying to unify{indentD lhs}\nwith{indentD rhs}"
+        -- "
 
 def mkLevelStuckErrorMessage (entry : PostponedEntry) : MetaM MessageData := do
   mkLevelErrorMessageCore "stuck at solving universe constraint" entry
