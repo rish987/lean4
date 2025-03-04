@@ -1704,14 +1704,17 @@ def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalConte
       return false
   return result
 
+@[extern "lean_kernel_whnf_core_new"]
+opaque whnfCore (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a : Expr) (fuel : Nat) : EIO Kernel.Exception Expr
+
 /--
   Kernel WHNF function. We use it mainly for debugging purposes.
   Recall that the kernel type checker does not support metavariables.
   When implementing automation, consider using the `MetaM` methods. -/
 -- We use `Lean.Environment` for ease of use; as this is a debugging function, we forgo a
 -- `Kernel.Environment` base variant
-@[extern "lean_kernel_whnf"]
-opaque whnf (env : Lean.Environment) (lctx : LocalContext) (a : Expr) : Except Kernel.Exception Expr
+@[extern "lean_kernel_whnf_new"]
+opaque whnf (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a : Expr) (fuel : Nat) : EIO Kernel.Exception Expr
 
 /--
   Kernel typecheck function. We use it mainly for debugging purposes.

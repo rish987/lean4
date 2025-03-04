@@ -2024,12 +2024,17 @@ private def isDefEqProjInst (t : Expr) (s : Expr) : MetaM LBool := do
   else
     return .undef
 
+def ifNotShallow (t : T) (m : T → MetaM T) : MetaM T := do
+  if not (← getConfig).shallow then m t else pure t
+
+def whnfCoreS (t : Expr) : MetaM Expr := ifNotShallow t whnfCore
+
 private def isExprDefEqExpensive (t : Expr) (s : Expr) : MetaM Bool := do
   whenUndefDo (isDefEqEta t s) do
   whenUndefDo (isDefEqEta s t) do
   if (← isDefEqProj t s) then return true
-  let t' ← whnfCore t
-  let s' ← whnfCore s
+  let t' ← whnfCoreS t
+  let s' ← whnfCoreS s
   if t != t' || s != s' then
     Meta.isExprDefEqAux t' s'
   else
@@ -2102,40 +2107,6 @@ private def whnfCoreAtDefEq (e : Expr) : MetaM Expr := do
   else
     whnfCore e
 
-private def _ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
-  match m x with
-  | .ok s I => .ok (.inl s) I
-  | .error e I => .ok (.inr e) I
-
-def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
-  match ← _ofKernelExceptionEIO m with
-    | .inl env => pure env
-    | .inr e =>
-      throwKernelException e
-
-def instantiateLDecl (l : LocalDecl) : MetaM LocalDecl := do
-  match l with
-  | .cdecl idx id n t bi k =>
-    let t ← instantiateMVars t
-    -- if t.hasExprMVar then
-    --   return none
-    return .cdecl idx id n t bi k
-  | .ldecl idx id n t v nd k =>
-    let t ← instantiateMVars t
-    -- if t.hasExprMVar then
-    --   return none
-    let v ← instantiateMVars v
-    -- if v.hasExprMVar then
-    --   return none
-    return .ldecl idx id n t v nd k
-
-def instantiateLCtx : MetaM LocalContext := do
-  let mut newLctx := default
-  for decl in (← read).lctx do
-    let instDecl ← instantiateLDecl decl -- | return none
-    newLctx := newLctx.addDecl instDecl
-  return newLctx
-
 @[export lean_is_expr_def_eq]
 partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecDepth do
   withTraceNodeBefore `Meta.isDefEq (return m!"{t} =?= {s}") do
@@ -2177,8 +2148,8 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     `whnfCore t (config := { proj := .yes })` which more conservative than `.yesWithDeltaI`,
     and it only created performance issues when handling TC unification problems.
   -/
-  let t' ← whnfCoreAtDefEq t
-  let s' ← whnfCoreAtDefEq s
+  let t' ← ifNotShallow t whnfCoreAtDefEq
+  let s' ← ifNotShallow s whnfCoreAtDefEq
   if t != t' || s != s' then
     isExprDefEqAuxImpl t' s'
   else

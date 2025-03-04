@@ -48,15 +48,15 @@ theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
--- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
-example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
+example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
+-- example (x y : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x
 -- 1 + y --> succ (zero + y)
 
 -- @[dfeq]
 -- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
-
+--
 -- example (a b c : Nat) (hb : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
 
 -- set_option pp.explicit true in

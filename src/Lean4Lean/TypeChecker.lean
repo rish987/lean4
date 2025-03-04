@@ -410,9 +410,9 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Optio
     let env ← getEnv
     let lemNames := DfEq.rwExt.getState env
     let mut candidates := (← lemNames.mapM (mkConstWithFreshMVarLevels ·)) ++ localRws
-    let condString := s!"{← ppExpr $ e} rewrites? ({e}) {(← readThe Core.Context).options}"
-    if dbg then
-      dbg_trace s!"Trying to show {condString}"
+    -- let condString := s!"{← ppExpr $ e} rewrites? ({e}) {(← readThe Core.Context).options}"
+    -- if dbg then
+    --   dbg_trace s!"Trying to show {condString}"
     withLCtx' (← read).lctx do
       let sMvar ← Lean.Meta.mkFreshExprMVar T
       let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
@@ -420,11 +420,11 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Optio
       let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
       let tryExtRw lem := do
         try
-          if dbg then
-            dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          let gs ← eqMvar.mvarId!.apply lem (cfg := {approx := false})
-          if dbg then
-            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localRws.mapM (do ppExpr $ ← Meta.inferType ·)}"
+          -- if dbg then
+          --   dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          let gs ← eqMvar.mvarId!.apply lem (cfg := {approx := false, shallow := true})
+          -- if dbg then
+          --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localRws.mapM (do ppExpr $ ← Meta.inferType ·)}"
           -- TODO unassign eqMvar if any g.refl fails?
           for g in gs do
             try
@@ -435,15 +435,15 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Optio
             return none
           pure $ .some ((← instantiateMVars eqMvar), (← instantiateMVars sMvar))
         catch _ =>
-          if dbg then
-            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          -- if dbg then
+          --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
           pure none
       for lem in candidates do
         if let .some prf ← tryExtRw lem then
           return some prf
-      if dbg then
-        dbg_trace s!"Showing FAIL: {condString}"
-        if dbg then printTraces
+      -- if dbg then
+      --   dbg_trace s!"Showing FAIL: {condString}"
+      -- if dbg then printTraces
       return none
     ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
   let ret? ← match ← toKernelException check with
@@ -842,7 +842,7 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
           try
             -- if localDfEqs.length = 3 then
             --   dbg_trace s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-            let gs ← eqMvar.mvarId!.apply lem
+            let gs ← eqMvar.mvarId!.apply lem (cfg := {approx := false, shallow := true})
             -- let r ← eqMvar.mvarId!.rewrite tEqs lem
             -- let mainGoal ← eqMvar.mvarId!.replaceTargetEq r.eNew r.eqProof
             -- let gs := mainGoal :: r.mvarIds
@@ -1082,3 +1082,13 @@ def etaExpand (e : Expr) : M Expr :=
 def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) : EIO Kernel.Exception Bool :=
   M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) (fuel := fuel) do
     TypeChecker.isDefEqCheckTypes' (500 + n) lps a b
+
+@[export lean_kernel_whnf_new]
+def whnfK (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a : Expr) (fuel : Nat) : EIO Kernel.Exception Expr :=
+  M.run env.toKernelEnv env (lctx := lctx) (safety := DefinitionSafety.safe) (fuel := fuel) do
+    withReader ({ · with lparams := lps }) (Inner.whnf a).run
+
+@[export lean_kernel_whnf_core_new]
+def whnfCoreK (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a : Expr) (fuel : Nat) : EIO Kernel.Exception Expr :=
+  M.run env.toKernelEnv env (lctx := lctx) (safety := DefinitionSafety.safe) (fuel := fuel) do
+    withReader ({ · with lparams := lps }) (Inner.whnfCore a).run

@@ -581,12 +581,55 @@ private def whnfDelayedAssigned? (f' : Expr) (e : Expr) : MetaM (Option Expr) :=
   else
     return none
 
+private def _ofKernelExceptionEIO (m : EIO Kernel.Exception α) : EIO Exception (Sum α Kernel.Exception) := fun x =>
+  match m x with
+  | .ok s I => .ok (.inl s) I
+  | .error e I => .ok (.inr e) I
+
+def ofKernelExceptionEIO (m : EIO Kernel.Exception α) : CoreM α := do
+  match ← _ofKernelExceptionEIO m with
+    | .inl env => pure env
+    | .inr e =>
+      throwKernelException e
+
+def instantiateLDecl (l : LocalDecl) : MetaM LocalDecl := do
+  match l with
+  | .cdecl idx id n t bi k =>
+    let t ← instantiateMVars t
+    -- if t.hasExprMVar then
+    --   return none
+    return .cdecl idx id n t bi k
+  | .ldecl idx id n t v nd k =>
+    let t ← instantiateMVars t
+    -- if t.hasExprMVar then
+    --   return none
+    let v ← instantiateMVars v
+    -- if v.hasExprMVar then
+    --   return none
+    return .ldecl idx id n t v nd k
+
+def instantiateLCtx : MetaM LocalContext := do
+  let mut newLctx := default
+  for decl in (← read).lctx do
+    let instDecl ← instantiateLDecl decl -- | return none
+    newLctx := newLctx.addDecl instDecl
+  return newLctx
+
 /--
 Apply beta-reduction, zeta-reduction (i.e., unfold let local-decls), iota-reduction,
 expand let-expressions, expand assigned meta-variables.
 -/
-partial def whnfCore (e : Expr) : MetaM Expr :=
-  go e
+partial def whnfCore (e : Expr) : MetaM Expr := do
+  let e ← instantiateMVars e
+  if not e.hasExprMVar && (← read).fuel > 0 then
+    let lctx ← instantiateLCtx
+    let mut lparams := []
+    for (lmvarId, _) in (← getMCtx).lDepth do
+      lparams := lmvarId.name :: lparams
+    let ret ← ofKernelExceptionEIO $ Lean.Kernel.whnfCore lparams (← getThe Lean.Core.State).env lctx e ((← read).fuel - 1) -- localDfEqs
+    pure ret
+  else
+    go e
 where
   go (e : Expr) : MetaM Expr :=
     whnfEasyCases e fun e => do
