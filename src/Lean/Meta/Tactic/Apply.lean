@@ -8,6 +8,7 @@ import Lean.Util.FindMVar
 import Lean.Meta.SynthInstance
 import Lean.Meta.CollectMVars
 import Lean.Meta.Tactic.Util
+import Lean.Meta.ExprDefEq
 import Lean.PrettyPrinter
 
 namespace Lean.Meta
@@ -153,9 +154,9 @@ private def reorderGoals (mvars : Array Expr) : ApplyNewGoals → MetaM (List MV
 private def isDefEqApply (cfg : ApplyConfig) (a b : Expr) : MetaM Bool := do
   if cfg.shallow then
     if cfg.approx then
-      approxDefEq <| shallowDefEq <| isDefEqGuarded a b
+      approxDefEq <| shallowDefEq <| Meta.isExprDefEqShallowImpl a b
     else
-      shallowDefEq <| isDefEqGuarded a b
+      shallowDefEq <| Meta.isExprDefEqShallowImpl a b
   else if cfg.approx then
     approxDefEq <| isDefEqGuarded a b
   else
@@ -164,11 +165,11 @@ private def isDefEqApply (cfg : ApplyConfig) (a b : Expr) : MetaM Bool := do
 /--
 Close the given goal using `apply e`.
 -/
-def _root_.Lean.MVarId.apply (mvarId : MVarId) (e : Expr) (cfg : ApplyConfig := {}) : MetaM (List MVarId) :=
+def _root_.Lean.MVarId.apply (mvarId : MVarId) (e : Expr) (cfg : ApplyConfig := {}) (eType? : Option Expr := none) : MetaM (List MVarId) :=
   mvarId.withContext do
     mvarId.checkNotAssigned `apply
     let targetType ← mvarId.getType
-    let eType      ← inferType e
+    let eType      ← eType?.getDM (inferType e)
     let (numArgs, hasMVarHead) ← getExpectedNumArgsAux eType
     /-
     The `apply` tactic adds `_`s to `e`, and some of these `_`s become new goals.

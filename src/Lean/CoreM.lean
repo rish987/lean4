@@ -58,6 +58,7 @@ def useDiagnosticMsg : MessageData :=
 namespace Core
 
 builtin_initialize registerTraceClass `Kernel
+builtin_initialize registerTraceClass `Kernel.ext
 
 def getMaxHeartbeats (opts : Options) : Nat :=
   maxHeartbeats.get opts * 1000

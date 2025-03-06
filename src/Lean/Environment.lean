@@ -487,13 +487,13 @@ def asyncMayContain (env : Environment) (declName : Name) : Bool :=
   env.asyncCtx?.all (·.mayContain declName)
 
 @[extern "lean_add_decl_new"]
-opaque addDeclCore' (env : Environment) (decl : Declaration) (check := true) :
+opaque addDeclCore' (env : Environment) (decl : Declaration) (options : Options) (check := true):
   EIO KernelException Environment
 
 -- @[extern "lean_elab_add_decl"]
 private opaque addDeclCheck (env : Environment) (maxHeartbeats : USize) (decl : Declaration)
-  (cancelTk? : @& Option IO.CancelToken) : EIO Kernel.Exception Environment :=
-  addDeclCore' env decl
+  (cancelTk? : @& Option IO.CancelToken) (options : Options) : EIO Kernel.Exception Environment :=
+  addDeclCore' env decl options
 
 @[extern "lean_elab_add_decl_without_checking"]
 private opaque addDeclWithoutChecking (env : Environment) (decl : @& Declaration) :
@@ -511,14 +511,14 @@ This is a plumbing function for the implementation of `Lean.addDecl`, most users
 instead.
 -/
 def addDeclCore (env : Environment) (maxHeartbeats : USize) (decl : @& Declaration)
-    (cancelTk? : @& Option IO.CancelToken) (doCheck := true) :
+    (cancelTk? : @& Option IO.CancelToken) (doCheck := true) (options : Options) :
     EIO Kernel.Exception Environment := do
   if let some ctx := env.asyncCtx? then
     if let some n := decl.getNames.find? (!ctx.mayContain ·) then
       throw <| .other s!"cannot add declaration {n} to environment as it is restricted to the \
         prefix {ctx.declPrefix}"
   if doCheck then
-    addDeclCheck env maxHeartbeats decl cancelTk?
+    addDeclCheck env maxHeartbeats decl cancelTk? options
   else
     toEIO $ addDeclWithoutChecking env decl
 
@@ -1693,13 +1693,13 @@ namespace Kernel
 -- We use `Lean.Environment` for ease of use; as this is a debugging function, we forgo a
 -- `Kernel.Environment` base variant
 @[extern "lean_kernel_is_def_eq_new"]
-opaque isDefEq (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) : EIO Kernel.Exception Bool
+opaque isDefEq (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) (options : Options) : EIO Kernel.Exception Bool
 
 -- TODO make localDfEqs mandatory
-def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr := []) : EIO Kernel.Exception Bool := do
+def isDefEqGuarded (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr := []) (options : Options) : EIO Kernel.Exception Bool := do
   let result ←
     try
-      isDefEq 1 lps env lctx a b fuel localDfEqs
+      isDefEq 1 lps env lctx a b fuel localDfEqs options
     catch _ =>
       return false
   return result

@@ -24,7 +24,7 @@ register_builtin_option debug.skipKernelTC : Bool := {
 
 private def Environment.addDeclAux (env : Environment) (opts : Options) (decl : Declaration)
     (cancelTk? : Option IO.CancelToken := none) : EIO Kernel.Exception Environment :=
-  env.addDeclCore (Core.getMaxHeartbeats opts).toUSize decl cancelTk? (!debug.skipKernelTC.get opts)
+  env.addDeclCore (Core.getMaxHeartbeats opts).toUSize decl cancelTk? (!debug.skipKernelTC.get opts) opts
 
 @[deprecated "use `Lean.addDecl` instead to ensure new namespaces are registered" (since := "2024-12-03")]
 def Environment.addDecl (env : Environment) (opts : Options) (decl : Declaration)

@@ -2192,7 +2192,7 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     -/
     let t ← instantiateMVars t
     let s ← instantiateMVars s
-    if not t.hasExprMVar && not s.hasExprMVar && (← read).fuel > 0 then
+    if not t.hasExprMVar && not s.hasExprMVar && (← read).fuel > 0 && not (← getConfig).shallow then
       let lctx ← instantiateLCtx
       let mut lparams := []
       for (lmvarId, _) in (← getMCtx).lDepth do
@@ -2203,7 +2203,7 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
         --   if let .app (.const ``localDfEq []) e := decl.type then
         --     dbg_trace s!"DBG[339]: ExprDefEq.lean:2178 {e}"
         --     localDfEqs := localDfEqs ++ [decl.toExpr]
-        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s ((← read).fuel - 1)-- localDfEqs
+        let ret ← ofKernelExceptionEIO $ Lean.Kernel.isDefEqGuarded lparams (← getThe Lean.Core.State).env lctx t s ((← read).fuel - 1) [] (← getOptions)-- localDfEqs
         pure ret
       if ret then return true
     let numPostponed ← getNumPostponed
@@ -2221,6 +2221,40 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
         trace[Meta.isDefEq.cache] "cache {result} for {t} =?= {s}"
         cacheResult k result
       return result
+
+partial def isExprDefEqShallowImpl (t : Expr) (s : Expr) : MetaM Bool :=
+  let rec processBinding (lctx : LocalContext) (fvars : Array Expr) (t s : Expr) : MetaM Bool :=
+    let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : MetaM Bool := do
+      let d₁     := d₁.instantiateRev fvars
+      let d₂     := d₂.instantiateRev fvars
+      if not (← isExprDefEqShallowImpl d₁ d₂) then
+        return false
+      let fvarId ← mkFreshFVarId
+      let lctx   := lctx.mkLocalDecl fvarId n d₁
+      let fvars  := fvars.push (mkFVar fvarId)
+      processBinding lctx fvars b₁ b₂
+    match t, s with
+    | .forallE n d₁ b₁ _,    .forallE _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
+    | .lam     n d₁ b₁ _,    .lam     _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
+    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => isExprDefEqShallowImpl v₁ v₂ <&&> process n d₁ d₂ b₁ b₂
+    | _,                  _                  =>
+      withLCtx' lctx do
+        isExprDefEqShallowImpl (t.instantiateRev fvars) (s.instantiateRev fvars)
+  match t, s with
+  | .lam .., .lam ..
+  | .forallE .., .forallE ..
+  | .letE .., .letE .. => do processBinding (← getLCtx) #[] t s
+  | .sort a1, .sort a2 => pure (a1.isEquiv a2)
+  | .mdata _ a1, .mdata _ a2 => isExprDefEqShallowImpl a1 a2
+  | .lit a1, .lit a2 => pure (a1 == a2)
+  | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEqShallowImpl s s'
+  | .const n ls, .const n' ls' => pure (n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l'))
+  | .fvar id, .fvar id' => pure $ id == id'
+  | .app f a, .app f' a' => isExprDefEqShallowImpl f f' <&&> isExprDefEqShallowImpl a a'
+  | .bvar .., _ => unreachable!
+  | _, .bvar .. => unreachable!
+  | .mvar .., _ => checkTypesAndAssign t s
+  | _, _ => pure false
 
 builtin_initialize
   registerTraceClass `Meta.isDefEq
