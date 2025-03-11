@@ -3058,10 +3058,10 @@ equips a monad with additional read-only state, of type `ρ`.
 
   [`ReaderT`]: https://hackage.haskell.org/package/transformers-0.5.5.0/docs/Control-Monad-Trans-Reader.html#t:ReaderT
 -/
-def ReaderT (ρ : Type u) (m : Type u → Type v) (α : Type u) : Type (max u v) :=
+def ReaderT (ρ : Type u) (m : Type v → Type w) (α : Type v) : Type (max u w) :=
   ρ → m α
 
-instance (ρ : Type u) (m : Type u → Type v) (α : Type u) [Inhabited (m α)] : Inhabited (ReaderT ρ m α) where
+instance (ρ : Type u) (m : Type v → Type w) (α : Type v) [Inhabited (m α)] : Inhabited (ReaderT ρ m α) where
   default := fun _ => default
 
 /--
@@ -3069,13 +3069,13 @@ If `x : ReaderT ρ m α` and `r : ρ`, then `x.run r : ρ` runs the monad with t
 given reader state.
 -/
 @[always_inline, inline]
-def ReaderT.run {ρ : Type u} {m : Type u → Type v} {α : Type u} (x : ReaderT ρ m α) (r : ρ) : m α :=
+def ReaderT.run {ρ : Type u} {m : Type v → Type w} {α : Type v} (x : ReaderT ρ m α) (r : ρ) : m α :=
   x r
 
 namespace ReaderT
 
 section
-variable {ρ : Type u} {m : Type u → Type v} {α : Type u}
+variable {ρ : Type u} {m : Type v → Type w} {α : Type v}
 
 instance  : MonadLift m (ReaderT ρ m) where
   monadLift x := fun _ => x
@@ -3088,11 +3088,11 @@ instance (ε) [MonadExceptOf ε m] : MonadExceptOf ε (ReaderT ρ m) where
 end
 
 section
-variable {ρ : Type u} {m : Type u → Type v}
+variable {ρ : Type u} {m : Type v → Type w} {m' : Type u → Type w}
 
 /-- `(← read) : ρ` gets the read-only state of a `ReaderT ρ`. -/
 @[always_inline, inline]
-protected def read [Monad m] : ReaderT ρ m ρ :=
+protected def read [Monad m'] : ReaderT ρ m' ρ :=
   pure
 
 /-- The `pure` operation of the `ReaderT` monad. -/
@@ -3128,7 +3128,7 @@ instance (ρ m) : MonadFunctor m (ReaderT ρ m) where
 `ReaderT ρ`, yielding a `ReaderT ρ'`.
 -/
 @[always_inline, inline]
-protected def adapt {ρ' α : Type u} (f : ρ' → ρ) : ReaderT ρ m α → ReaderT ρ' m α :=
+protected def adapt {ρ' α : Type u} (f : ρ' → ρ) : ReaderT ρ m' α → ReaderT ρ' m' α :=
   fun x r => x (f r)
 
 end
@@ -3183,34 +3183,34 @@ function `f : ρ → ρ`. In addition to `ReaderT` itself, this operation lifts
 over most monad transformers, so it allows us to apply `withReader` to monads
 deeper in the stack.
 -/
-class MonadWithReaderOf (ρ : semiOutParam (Type u)) (m : Type u → Type v) where
+class MonadWithReaderOf (ρ : semiOutParam (Type u)) (m : Type v → Type w) where
   /-- `withReader (f : ρ → ρ) (x : m α) : m α`  runs the inner `x : m α` inside
   a modified context after applying the function `f : ρ → ρ`.-/
-  withReader {α : Type u} : (ρ → ρ) → m α → m α
+  withReader {α : Type v} : (ρ → ρ) → m α → m α
 
 /--
 Like `withReader`, but with `ρ` explicit. This is useful if a monad supports
 `MonadWithReaderOf` for multiple different types `ρ`.
 -/
 @[always_inline, inline]
-def withTheReader (ρ : Type u) {m : Type u → Type v} [MonadWithReaderOf ρ m] {α : Type u} (f : ρ → ρ) (x : m α) : m α :=
+def withTheReader (ρ : Type u) {m : Type v → Type w} [MonadWithReaderOf ρ m] {α : Type v} (f : ρ → ρ) (x : m α) : m α :=
   MonadWithReaderOf.withReader f x
 
 /-- Similar to `MonadWithReaderOf`, but `ρ` is an `outParam` for convenience. -/
-class MonadWithReader (ρ : outParam (Type u)) (m : Type u → Type v) where
+class MonadWithReader (ρ : outParam (Type u)) (m : Type v → Type w) where
   /-- `withReader (f : ρ → ρ) (x : m α) : m α`  runs the inner `x : m α` inside
   a modified context after applying the function `f : ρ → ρ`.-/
-  withReader {α : Type u} : (ρ → ρ) → m α → m α
+  withReader {α : Type v} : (ρ → ρ) → m α → m α
 
 export MonadWithReader (withReader)
 
-instance (ρ : Type u) (m : Type u → Type v) [MonadWithReaderOf ρ m] : MonadWithReader ρ m where
+instance (ρ : Type u) (m : Type v → Type w) [MonadWithReaderOf ρ m] : MonadWithReader ρ m where
   withReader := withTheReader ρ
 
-instance {ρ : Type u} {m : Type u → Type v} {n : Type u → Type v} [MonadFunctor m n] [MonadWithReaderOf ρ m] : MonadWithReaderOf ρ n where
+instance {ρ : Type u} {m : Type v → Type w} {n : Type v → Type w} [MonadFunctor m n] [MonadWithReaderOf ρ m] : MonadWithReaderOf ρ n where
   withReader f := monadMap (m := m) (withTheReader ρ f)
 
-instance {ρ : Type u} {m : Type u → Type v} : MonadWithReaderOf ρ (ReaderT ρ m) where
+instance {ρ : Type u} {m : Type v → Type w} : MonadWithReaderOf ρ (ReaderT ρ m) where
   withReader f x := fun ctx => x (f ctx)
 
 /--

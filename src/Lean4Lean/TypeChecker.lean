@@ -59,11 +59,15 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → M Bool
-  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : M Expr
-  whnf (e : Expr) (d : Option (Level × Expr)) : M Expr
+  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) (f : Expr → M T) : M T
+  whnf (e : Expr) (d : Option (Level × Expr)) (f : Expr → M T) : M T
   inferType (e : Expr) (inferOnly : Bool) : M Expr
 
 abbrev RecM := ReaderT Methods M
+
+-- TODO can this be derived from a more general rule?
+instance (priority := low) : MonadWithReaderOf LocalContext RecM where
+  withReader f m := fun b c => m b ({c with lctx := f c.lctx})
 
 inductive ReductionStatus where
   | continue (tn sn : Expr)
@@ -72,16 +76,18 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecM Expr := fun m => m.whnf e d 
+def whnf (e : Expr) (d : Option (Level × Expr) := none) (f : Expr → RecM T) : RecM T := fun m => m.whnf e d fun e => f e m
 
-@[inline] def withLCtx [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
+@[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
-  if e.isSort then return e
-  let e ← whnf e d
-  if e.isSort then return e
-  throw <| .typeExpected (← getKEnv) (← getLCtx) s
+def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) (f : Expr → RecM T) : RecM T := do
+  if e.isSort then
+    f e
+  else
+    let e ← whnf e d
+    if e.isSort then return e
+    throw <| .typeExpected (← getKEnv) (← getLCtx) s
   -- throw <| .other s!"{e.ctorName}, {e}"
 
 def ensureForallCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
@@ -307,15 +313,15 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     { s with inferTypeC := s.inferTypeC.insert e r }
   return r
 
-def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr :=
-  fun m => m.whnfCore e l cheapRec cheapProj
+def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) (f : Expr → RecM T) : RecM Expr :=
+  fun m => m.whnfCore e l cheapRec cheapProj fun e => f e m
 
-def reduceRecursor (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
+def reduceRecursor (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) (f : Expr → RecM T) : RecM (Option Expr) := do
   let env ← getKEnv
   if env.quotInit then
     if let some r ← quotReduceRec e (whnf) then
       return r
-  let whnf' e := if cheapRec then whnfCore e l cheapRec cheapProj else whnf e
+  let whnf' e := if cheapRec then whnfCore e l cheapRec cheapProj else whnf e f
   if let some r ← inductiveReduceRec env e whnf' inferType (isDefEqCheckTypes 16) then
     return r
   return none

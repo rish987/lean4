@@ -46,7 +46,7 @@ theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 -- theorem succComm : Nat.succ n = 1 + n := sorry
 
 -- set_option trace.Kernel.ext true in
-example : 0 + n = n := rfl
+example : Nat.add 0 n = n := rfl
 -- set_option trace.Kernel.ext true in
 example : Nat.zero + n = n := rfl
 def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=

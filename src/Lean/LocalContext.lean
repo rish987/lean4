@@ -496,7 +496,7 @@ def sortFVarsByContextOrder (lctx : LocalContext) (hyps : Array FVarId) : Array 
 end LocalContext
 
 /-- Class used to denote that `m` has a local context. -/
-class MonadLCtx (m : Type → Type) where
+class MonadLCtx (m : Type → Type v) where
   getLCtx : m LocalContext
 
 export MonadLCtx (getLCtx)

@@ -269,19 +269,19 @@ namespace NameGenerator
 
 end NameGenerator
 
-class MonadNameGenerator (m : Type → Type) where
+class MonadNameGenerator (m : Type → Type u) where
   getNGen : m NameGenerator
   setNGen : NameGenerator → m Unit
 
 export MonadNameGenerator (getNGen setNGen)
 
-def mkFreshId {m : Type → Type} [Monad m] [MonadNameGenerator m] : m Name := do
+def mkFreshId {m : Type → Type u} [Monad m] [MonadNameGenerator m] : m Name := do
   let ngen ← getNGen
   let r := ngen.curr
   setNGen ngen.next
   pure r
 
-instance monadNameGeneratorLift (m n : Type → Type) [MonadLift m n] [MonadNameGenerator m] : MonadNameGenerator n := {
+instance monadNameGeneratorLift (m : Type → Type u) (n : Type → Type v) [MonadLift m n] [MonadNameGenerator m] : MonadNameGenerator n := {
   getNGen := liftM (getNGen : m _),
   setNGen := fun ngen => liftM (setNGen ngen : m _)
 }
