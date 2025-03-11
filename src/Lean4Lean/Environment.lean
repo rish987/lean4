@@ -103,25 +103,35 @@ namespace Environment
 
 open private updateBaseAfterKernelAdd from Lean.Environment
 
+def runMetaM (env : Environment) (options : Options) (m : MetaM T) : EIO KernelException T := do
+  let m' := Lean.Meta.MetaM.run m {} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env}
+  match ← TypeChecker.Inner.toKernelException m' with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
 /-- Type check given declaration and add it to the environment -/
 @[export lean_add_decl_new]
 def addDecl' (env' : Environment) (decl : Declaration) (check := true) (options : Options) :
     EIO KernelException Environment := do
-  let env := env'.toKernelEnv
-  let newEnv ← match decl with
-  | .axiomDecl v =>
-    env.addAxiom env' options v check
-  | .defnDecl v =>
-    env.addDefinition env' options v check
-  | .thmDecl v =>
-    env.addTheorem env' options v check
-  | .opaqueDecl v =>
-    env.addOpaque env' options v check
-  | .mutualDefnDecl v =>
-    env.addMutual env' options v check
-  | .quotDecl =>
-    env.addQuot
-  | .inductDecl lparams nparams types isUnsafe =>
-    let allowPrimitive ← env.checkPrimitiveInductive env' lparams nparams types isUnsafe options
-    env.addInductive env' lparams nparams types isUnsafe allowPrimitive options
-  return updateBaseAfterKernelAdd env' newEnv
+  try
+    let env := env'.toKernelEnv
+    let newEnv ← match decl with
+    | .axiomDecl v =>
+      env.addAxiom env' options v check
+    | .defnDecl v =>
+      env.addDefinition env' options v check
+    | .thmDecl v =>
+      env.addTheorem env' options v check
+    | .opaqueDecl v =>
+      env.addOpaque env' options v check
+    | .mutualDefnDecl v =>
+      env.addMutual env' options v check
+    | .quotDecl =>
+      env.addQuot
+    | .inductDecl lparams nparams types isUnsafe =>
+      let allowPrimitive ← env.checkPrimitiveInductive env' lparams nparams types isUnsafe options
+      env.addInductive env' lparams nparams types isUnsafe allowPrimitive options
+    return updateBaseAfterKernelAdd env' newEnv
+  catch e =>
+    throw e

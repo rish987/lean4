@@ -338,10 +338,7 @@ private partial def isDefEqArgs (f : Expr) (args₁ args₂ : Array Expr) : Meta
       let d₂       := ds₂[i]!
       if (← Meta.isExprDefEqAux fvarType d₂) then
         let cont := do
-          if let .app (.const ``localDfEq []) e := d₂ then
-            withLocalDfEq (← instantiateMVars e) (loop (i+1))
-          else
-            loop (i+1)
+          loop (i+1)
         match (← isClass? fvarType) with
         | some className => withNewLocalInstance className fvar <| cont
         | none           => cont
@@ -2245,7 +2242,8 @@ partial def isExprDefEqShallowImpl (t : Expr) (s : Expr) : MetaM Bool :=
   | .forallE .., .forallE ..
   | .letE .., .letE .. => do processBinding (← getLCtx) #[] t s
   | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-  | .mdata _ a1, .mdata _ a2 => isExprDefEqShallowImpl a1 a2
+  | .mdata _ a1, _ => isExprDefEqShallowImpl a1 s
+  | _, .mdata _ a2 => isExprDefEqShallowImpl t a2
   | .lit a1, .lit a2 => pure (a1 == a2)
   | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEqShallowImpl s s'
   | .const n ls, .const n' ls' => pure (n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l'))
@@ -2253,8 +2251,14 @@ partial def isExprDefEqShallowImpl (t : Expr) (s : Expr) : MetaM Bool :=
   | .app f a, .app f' a' => isExprDefEqShallowImpl f f' <&&> isExprDefEqShallowImpl a a'
   | .bvar .., _ => unreachable!
   | _, .bvar .. => unreachable!
-  | .mvar .., _ => checkTypesAndAssign t s
-  | _, _ => pure false
+  | .mvar .., .mvar .. => 
+    checkTypesAndAssign s t
+  | _, .mvar .. => 
+    checkTypesAndAssign s t
+  | .mvar .., _ =>
+    checkTypesAndAssign t s
+  | _, _ =>
+    pure false
 
 builtin_initialize
   registerTraceClass `Meta.isDefEq

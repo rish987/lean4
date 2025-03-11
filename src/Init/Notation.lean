@@ -354,8 +354,8 @@ macro_rules | `($x ≥ $y)  => `(binrel% GE.ge $x $y)
 macro_rules | `($x = $y)  => `(binrel% Eq $x $y)
 macro_rules | `($x == $y) => `(binrel_no_prop% BEq.beq $x $y)
 
-macro_rules | `($x ≡ $y)  => `(localDfEq (Eq $x $y))
-macro_rules | `($x ⇛ $y)  => `(localRw (Eq $x $y))
+macro_rules | `($x ≡ $y)  => `(ldeq (Eq $x $y))
+macro_rules | `($x ⇛ $y)  => `(ldrw (Eq $x $y))
 
 recommended_spelling "le" for "≤" in [LE.le, «term_≤_»]
 /-- prefer `≤` over `<=` -/

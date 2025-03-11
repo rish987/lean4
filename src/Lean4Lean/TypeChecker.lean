@@ -389,36 +389,50 @@ def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Excep
   | .ok s I => .ok (.inl s) I
   | .error e I => .ok (.inr e) I
 
+def runMetaM (m : MetaM T) : RecM T := do
+  let mut options := (← readThe Context).options
+  let m' := Lean.Meta.MetaM.run m {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'}
+  match ← toKernelException m' with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
 open Lean.Meta in
-def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : List Name) : RecM (Option (Expr × List Expr)) := do
+def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) := do
   if (← readThe Context).fuel == 0 then
     return none
-
-  let mut options := (← readThe Context).options
   -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
   -- let localDfEqs := (← readThe Context).localDfEqs
+  -- if dbg then 
+  --   dbg_trace s!"DBG[387]: TypeChecker.lean:406 (after if dbg then)"
 
-  let check := (Lean.Meta.MetaM.run (do
+  let ret? ← runMetaM (do
     let mut localLems := []
     for decl in (← getLCtx) do
+      if dbg then 
+        dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
       if let .app (.const n []) _ := decl.type.getForallBody then -- TODO remove once we can generate lemmas for intermediate reducts
         if n == localMarker then
           let newType ← forallTelescope decl.type fun vs b => mkForallFVars vs b.appArg!
           localLems := localLems ++ [(decl.toExpr, .some newType)]
+          if dbg then 
+            dbg_trace s!"Added: {decl.userName} : {← ppExpr decl.type}"
 
     let mut candidates := (← lems.mapM (mkConstWithFreshMVarLevels ·)).zip (List.replicate lems.length none)
     candidates := candidates ++ localLems
     withLCtx' (← read).lctx do
-      let (T, ts) ← getT
+      let (T, _) ← getT
       let condString := s!"{← ppExpr $ ← T.mvarId!.getType}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
       trace[Kernel.ext] "Trying to show {condString}"
-      let tryExtEq lem type? TMvar := do
+      let tryExtEq lem type? T ts := do
         try
           trace[Kernel.ext] s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
           let gs ← T.mvarId!.apply lem (cfg := {shallow := true}) type?
 
           trace[Kernel.ext] s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+          if dbg then
+            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
           for g in gs do
             -- TODO unassign T if any g.refl fails?
             try
@@ -432,22 +446,23 @@ def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : Lis
           let TInst ← instantiateMVars T
           let tsInst ← ts.mapM fun t => instantiateMVars t
           return some (TInst, tsInst)
-        catch _ =>
+        catch e =>
           trace[Kernel.ext] s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
+          if dbg then
+            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
           pure none
       for (lem, type?) in candidates do
         -- for eqMvar in [tEqsMvar, sEqtMvar] do
-        if let .some prf ← tryExtEq lem type? T then
+        -- TODO is there a way to "undo" assignments from previous failed unification attempts,
+        -- rather than making new mvars every time?
+        let (T, ts) ← getT
+        if let .some prf ← tryExtEq lem type? T ts then
           printTraces
           return some prf
       trace[Kernel.ext] "Showing FAIL: {← ppExpr $ ← T.mvarId!.getType}"
       printTraces
       return none
-    ) {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'})
-  let ret? ← match ← toKernelException check with
-  | .inl ((reqs, _), _) => pure reqs
-  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
-  | .inr (.error _ d) => throw $ .other (← d.toString)
+    )
 
   if let some (prf, ts) := ret? then
     if prf.hasExprMVar then
@@ -469,14 +484,23 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Optio
     let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
     let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
     pure (eqMvar, [sMvar])
-  if let some (_, ts) ← extMatch getVars ``localRw (DfEq.rwExt.getState (← readThe Context).env') then 
+  if let some (_, ts) ← extMatch getVars ``ldrw (DfEq.rwExt.getState (← readThe Context).env') dbg then 
     return .some ts[0]!
   return none
 
 def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr := do
   let l ← l.getDM (getTypeInfo e)
   let e' ← whnfCoreNoExt' e l cheapRec cheapProj
-  if let .some e' ← reduceExt e' l then
+  let dbg := 
+    -- if let (.app (.app (.const ``Nat.add []) (.const ``Nat.zero [])) (.fvar a)) := e then
+    --   true
+    -- else
+      false
+  -- if dbg then
+  --   dbg_trace s!"DBG[376]: TypeChecker.lean:484 {e'}"
+  if let .some e' ← reduceExt e' l dbg then
+    -- if dbg then
+    --   dbg_trace s!"DBG[377]: TypeChecker.lean:487 {e'}"
     whnfCore e' l cheapRec cheapProj
   else
     pure e'
@@ -585,13 +609,10 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       if !(← isDefEqCheckTypes 17 tType sType) then return false
       pure (some sType)
     else pure none
-    if tBody.hasLooseBVars || sBody.hasLooseBVars then
-      let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
-      withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
-        isDefEqLambda tBody sBody (subst.push (.fvar id))
-    else
-      isDefEqLambda tBody sBody (subst.push default)
+    let sType := sType.getD (sDom.instantiateRev subst)
+    let id := ⟨← mkFreshId⟩
+    withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
+      isDefEqLambda tBody sBody (subst.push (.fvar id))
   | t, s => isDefEqCheckTypes 18 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
@@ -604,13 +625,10 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
         pure (some sType)
       else pure none
     let cont := do
-      if tBody.hasLooseBVars || sBody.hasLooseBVars then
-        let sType := sType.getD (sDom.instantiateRev subst)
-        let id := ⟨← mkFreshId⟩
-        withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
-          isDefEqForall tBody sBody (subst.push (.fvar id))
-      else
-        isDefEqForall tBody sBody (subst.push default)
+      let sType := sType.getD (sDom.instantiateRev subst)
+      let id := ⟨← mkFreshId⟩
+      withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
+        isDefEqForall tBody sBody (subst.push (.fvar id))
     -- if let .app (.const ``localDfEq []) _ := sDom then
     --   let sType := sType.getD (sDom.instantiateRev subst)
     --   let localDfEq := sType.appArg!
@@ -803,9 +821,9 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
     let eq := if rev then mkAppN (.const `Eq [l]) #[T, s, t] else mkAppN (.const `Eq [l]) #[T, t, s]
     let eqMvar ← Lean.Meta.mkFreshExprMVar eq
     pure (eqMvar, [])
-  if let some (_, _) ← extMatch (getVars false) ``localDfEq (DfEq.dfEqExt.getState (← readThe Context).env') then 
+  if let some (_, _) ← extMatch (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') then 
     return .true
-  if let some (_, _) ← extMatch (getVars true) ``localDfEq (DfEq.dfEqExt.getState (← readThe Context).env') then 
+  if let some (_, _) ← extMatch (getVars true) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') then 
     return .true
   return .undef
 
@@ -816,9 +834,11 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   --     localRws := localRws ++ [decl.toExpr]
   
   let mut dbg := false
-  if let (.app (.app (.const ``Nat.add []) (.app (.app (.const ``Nat.add []) _) (.fvar _))) (.fvar _)) := t then
-    if let (.app (.const ``Nat.succ []) (.app (.app (.const ``Nat.add []) (.fvar _)) (.fvar _))) := s then
-      dbg := true
+  -- if let (.app (.app (.const ``Nat.add []) (.const ``Nat.zero [])) (.fvar a)) := s then
+  --   if let .fvar b := t then
+  --     if a == b then
+  --       dbg_trace s!"DBG[364]: TypeChecker.lean:820 (after if let (.app (.const Nat.succ []) (.app …)"
+  --       dbg := true
   -- if let .app (.app (.const `Nat.add []) z) y := t then
   --   sorry
 
@@ -836,6 +856,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   --   dbg_trace s!"DBG[362]: TypeChecker.lean:474 {t}      {s}"
   let r ← quickIsDefEq t s l T (useHash := true)
   if r != .undef then return r == .true
+  -- if dbg then
+  --   dbg_trace s!"DBG[367]: TypeChecker.lean:840 (after if dbg then)"
 
   if !t.hasFVar && s.isConstOf ``true then
     if (← whnf t).isConstOf ``true then return true
@@ -853,10 +875,15 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   -- let sn ← elimLocalDfEq $ ← whnfCore s (cheapProj := true)
   let tn ← whnfCore t (l, T) (cheapProj := true)
   let sn ← whnfCore s (l, T) (cheapProj := true)
+  -- if dbg then
+  --   dbg_trace s!"DBG[365]: TypeChecker.lean:857 {s}, {sn}"
 
   if !(unsafe ptrEq tn t && ptrEq sn s) then
     let r ← quickIsDefEq tn sn l T
     if r != .undef then return r == .true
+
+  -- if dbg then
+  --   dbg_trace s!"DBG[369]: TypeChecker.lean:866 (after if dbg then)"
 
   let r' ← isDefEqProofIrrel T
 
@@ -868,15 +895,23 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
     -- dbg_trace s!"DBG[207]: {r}"
     return r' == .true
 
+  -- if dbg then
+  --   dbg_trace s!"DBG[370]: TypeChecker.lean:877 (after return r == .true)"
+
   let r' ← isDefEqExt t s l T
   if r' != .undef then
     return r' == .true
+
+  -- if dbg then
+  --   dbg_trace s!"DBG[371]: TypeChecker.lean:884 (after return r == .true)"
 
   -- TODO integrate directed exteqs into lazy delta reduction
   match ← lazyDeltaReduction tn sn l T with
   | .continue .. => unreachable!
   | .bool b => return b
   | .unknown tn sn =>
+  -- if dbg then
+  --   dbg_trace s!"DBG[372]: TypeChecker.lean:893 (after | .unknown tn sn =>)"
 
   match tn, sn with
   | .const tf tl, .const sf sl =>
@@ -885,11 +920,16 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   | .proj _ ti te, .proj _ si se =>
     if ti == si then if ← isDefEqCheckTypes 25 te se then return true
   | _, _ => pure ()
+  -- if dbg then
+  --   dbg_trace s!"DBG[373]: TypeChecker.lean:903 (after | _, _ => pure ())"
 
   let tnn ← whnfCore tn (l, T)
   let snn ← whnfCore sn (l, T)
   if !(unsafe ptrEq tnn tn && ptrEq snn sn) then
     return ← isDefEqCore 14 tnn snn l T
+
+  -- if dbg then
+  --   dbg_trace s!"DBG[366]: TypeChecker.lean:897 (after if dbg then)"
 
   if ← isDefEqApp n tn sn then return true
   if ← tryEtaExpansion tn sn l T then return true
@@ -897,6 +937,8 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := do
   let r ← tryStringLitExpansion tn sn
   if r != .undef then return r == .true
   if ← isDefEqUnitLike T then return true
+  -- if dbg then
+  --   dbg_trace s!"DBG[368]: TypeChecker.lean:909 {tn}, {sn}"
   return false
 
 end Inner
@@ -969,3 +1011,8 @@ def etaExpand (e : Expr) : M Expr :=
 def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) (options : Options) : EIO Kernel.Exception Bool :=
   M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) (fuel := fuel) (options := options) do
     TypeChecker.isDefEqCheckTypes' (500 + n) lps a b
+
+@[export lean_kernel_check_new]
+def checkK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (t : Expr) (options : Options) : EIO Kernel.Exception Expr :=
+  M.run env.toKernelEnv env (lctx := lctx) (safety := DefinitionSafety.safe) (options := options) do
+    TypeChecker.check t lps

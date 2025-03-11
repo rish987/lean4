@@ -283,8 +283,8 @@ inductive Eq : α → α → Prop where
 
 axiom Eq._k {α : Sort u_1} (a : α) (p : Eq a a) : Eq p (@Eq.refl α a)
 
-def localDfEq (α : Prop) := α
-def localRw (α : Prop) := α
+def ldeq (α : Prop) := α
+def ldrw (α : Prop) := α
 
 /-- Non-dependent recursor for the equality type. -/
 @[simp] abbrev Eq.ndrec.{u1, u2} {α : Sort u2} {a : α} {motive : α → Sort u1} (m : motive a) {b : α} (h : Eq a b) : motive b :=

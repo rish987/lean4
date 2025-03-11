@@ -25,13 +25,13 @@ initialize dfEqExt :
   }
 
 builtin_initialize registerBuiltinAttribute {
-  name := `dfeq
+  name := `deq
   descr := "extensional definitional equality"
   add := fun decl _ kind => MetaM.run' do
     let declTy := (← getConstInfo decl).type
     let (_, _, targetTy) ← withReducible <| forallMetaTelescopeReducing declTy
     let fail := throwError
-      "@[dfeq] attribute only applies to lemmas proving x = y, got {declTy}"
+      "@[deq] attribute only applies to lemmas proving x = y, got {declTy}"
     let .app (.app rel lhs) rhs := targetTy | fail
     let .app (.const ``Eq [_]) _ := rel | fail
     -- unless ← withNewMCtxDepth <| isDefEq lhs rhs do fail
@@ -46,7 +46,7 @@ initialize rwExt :
   }
 
 builtin_initialize registerBuiltinAttribute {
-  name := `rw
+  name := `drw
   descr := "extensional rewrite rule"
   add := fun decl _ kind => MetaM.run' do
     let declTy := (← getConstInfo decl).type

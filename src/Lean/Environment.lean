@@ -1719,8 +1719,8 @@ opaque whnf (env : Lean.Environment) (lctx : LocalContext) (a : Expr) : Except K
   When implementing automation, consider using the `MetaM` methods. -/
 -- We use `Lean.Environment` for ease of use; as this is a debugging function, we forgo a
 -- `Kernel.Environment` base variant
-@[extern "lean_kernel_check"]
-opaque check (env : Lean.Environment) (lctx : LocalContext) (a : Expr) : Except Kernel.Exception Expr
+@[extern "lean_kernel_check_new"]
+opaque check (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a : Expr) (options : Options) : EIO Kernel.Exception Expr
 
 end Kernel
 

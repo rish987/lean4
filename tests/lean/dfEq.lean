@@ -30,34 +30,53 @@
 --   rfl
 -- #print K.k
 --
--- inductive Vec : Nat → Type where
--- | nil : Vec 0
--- | cons {n : Nat} (v : Vec n) (x : Nat) : Vec (n + 1)
+inductive Vec : Nat → Type where
+| nil : Vec 0
+| cons {n : Nat} (v : Vec n) (x : Nat) : Vec (Nat.succ n)
 
--- @[rw]
--- theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
---
--- @[rw]
--- theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
+-- @[drw]
+-- theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
+@[drw]
+theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
+
+@[drw]
+theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 
 -- @[rw] -- bad rule leading to non-termination
 -- theorem succComm : Nat.succ n = 1 + n := sorry
---
--- def vecTest (n : Nat) (v : Vec n) : Vec (1 + n) :=
--- v.cons 1
+
+-- set_option trace.Kernel.ext true in
+example : 0 + n = n := rfl
+-- set_option trace.Kernel.ext true in
+example : Nat.zero + n = n := rfl
+def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
+v.cons 1
+
+-- set_option pp.all true in
+-- #print vecTest
+abbrev s := Nat.succ
+abbrev z := Nat.zero
 
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
--- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := rfl
+-- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
+example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x
 -- 1 + y --> succ (zero + y)
 
-@[dfeq]
-theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
+-- @[deq]
+-- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
-example (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
+-- theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
+
+-- @[deq]
+-- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
+
+theorem ex3 (h : ldeq ((x y z : Nat) → (hy : y = 0) → (hz : z = x) → x + y = z)) (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := Eq.refl (c)
+
+-- example (a b c : Nat) (ha : b = 0) (hc : c = a) : a + b = c := ex a b c ha hc
 -- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
 -- set_option pp.explicit true in
