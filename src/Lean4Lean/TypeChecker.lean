@@ -5,6 +5,7 @@ import Lean4Lean.Inductive.Reduce
 import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
+import Lean4Lean.ContT
 import Lean.Meta.Tactic.DfEq
 import Lean.Meta.Tactic.Rewrite
 import Lean.Meta.Tactic.Apply
@@ -36,6 +37,7 @@ structure TypeChecker.Context where
 namespace TypeChecker
 
 abbrev M := ReaderT Context <| StateT State <| EIO KernelException
+abbrev MO (T : Type) := ContT T M
 
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {}) (options : Options)
     (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : EIO KernelException α :=
@@ -59,11 +61,13 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → M Bool
-  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) (f : Expr → M T) : M T
-  whnf (e : Expr) (d : Option (Level × Expr)) (f : Expr → M T) : M T
+  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnf (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
   inferType (e : Expr) (inferOnly : Bool) : M Expr
 
 abbrev RecM := ReaderT Methods M
+abbrev RecMO (T : Type) := ContT T RecM
+abbrev RecMB := ContT Bool RecM
 
 -- TODO can this be derived from a more general rule?
 instance (priority := low) : MonadWithReaderOf LocalContext RecM where
@@ -76,21 +80,19 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def whnf (e : Expr) (d : Option (Level × Expr) := none) (f : Expr → RecM T) : RecM T := fun m => m.whnf e d fun e => f e m
+def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf e d fun e => f e m
 
 @[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) (f : Expr → RecM T) : RecM T := do
-  if e.isSort then
-    f e
-  else
-    let e ← whnf e d
-    if e.isSort then return e
-    throw <| .typeExpected (← getKEnv) (← getLCtx) s
+def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := do
+  if e.isSort then return e
+  let e ← whnf e d
+  if e.isSort then return e
+  throw <| .typeExpected (← getKEnv) (← getLCtx) s
   -- throw <| .other s!"{e.ctorName}, {e}"
 
-def ensureForallCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecM Expr := do
+def ensureForallCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := do
   if e.isForall then return e
   let e ← whnf e d
   if e.isForall then return e
@@ -135,7 +137,7 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
       let fvars := fvars.push (.fvar id)
       if !inferOnly then
         let dType ← inferType d inferOnly
-        _ ← ensureSortCore dType d
+        _ ← ensureSortCore dType d none |>.run'
       loop fvars body
   | e => do
     let r ← inferType (e.instantiateRev fvars) inferOnly
@@ -146,7 +148,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
   loop fvars us : Expr → RecM Expr
   | .forallE name dom body bi => do
     let d := dom.instantiateRev fvars
-    let t1 ← ensureSortCore (← inferType d inferOnly) d
+    let t1 ← ensureSortCore (← inferType d inferOnly) d |>.run'
     let us := us.push t1.sortLevel!
     let id := ⟨← mkFreshId⟩
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
@@ -154,7 +156,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
       loop fvars us body
   | e => do
     let r ← inferType (e.instantiateRev fvars) inferOnly
-    let s ← ensureSortCore r e
+    let s ← ensureSortCore r e |>.run'
     return .sort <| us.foldr mkLevelIMax' s.sortLevel!
 
 def isDefEqCore (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecM Bool := fun m => m.isDefEqCore n t s l T
@@ -175,7 +177,8 @@ def inferApp (e : Expr) : RecM Expr := do
       fType := body
     | _ =>
       fType := fType.instantiateRevRange j i args
-      fType := (← ensureForallCore fType e).bindingBody!
+      let e ← ensureForallCore fType e none fun e => pure e
+      fType := e.bindingBody!
       j := i
   return fType.instantiateRevRange j args.size args
 
@@ -202,7 +205,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
       let vals := vals.push val
       if !inferOnly then
         let typeType ← inferType type inferOnly
-        let .sort l ← ensureSortCore typeType type | unreachable!
+        let .sort l ← ensureSortCore typeType type |>.run' | unreachable!
         let valType ← inferType val inferOnly
         if !(← isDefEq 1 valType type (.succ l) typeType) then
           throw <| .letTypeMismatch (← getKEnv) (← getLCtx) name valType type
@@ -313,8 +316,9 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     { s with inferTypeC := s.inferTypeC.insert e r }
   return r
 
-def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) (f : Expr → RecM T) : RecM Expr :=
-  fun m => m.whnfCore e l cheapRec cheapProj fun e => f e m
+def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMB Expr :=
+  -- TODO what exactly is going on here?
+  fun f m => m.whnfCore e l cheapRec cheapProj fun e => f e m
 
 def reduceRecursor (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) (f : Expr → RecM T) : RecM (Option Expr) := do
   let env ← getKEnv
@@ -404,7 +408,7 @@ def runMetaM (m : MetaM T) : RecM T := do
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
 open Lean.Meta in
-def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) := do
+def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMB (Option (Expr × List Expr)) := do
   if (← readThe Context).fuel == 0 then
     return none
   -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
@@ -483,7 +487,7 @@ def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : Lis
   return none
 
 open Lean.Meta in
-def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Option Expr) := do
+def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMB (Option Expr) := do
   let (l, T) := d
   let getVars := do
     let sMvar ← Lean.Meta.mkFreshExprMVar T
@@ -494,7 +498,7 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecM (Optio
     return .some ts[0]!
   return none
 
-def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecM Expr := do
+def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMB Expr := do
   let l ← l.getDM (getTypeInfo e)
   let e' ← whnfCoreNoExt' e l cheapRec cheapProj
   let dbg := 
@@ -576,7 +580,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
   return none
 
-def whnf' (_e : Expr) (l : Option (Level × Expr)) : RecM Expr := do
+def whnf' (_e : Expr) (l : Option (Level × Expr)) : RecMB Expr := do
   let e ← whnfCore _e l
   -- Do not cache easy cases
   match e with
@@ -954,13 +958,13 @@ open Inner
 def Methods.withFuel : Nat → Methods
   | 0 =>
     { isDefEqCore := fun _ _ _ _ _ => throw .deepRecursion
-      whnfCore := fun _ _ _ _ => throw .deepRecursion
-      whnf := fun _ _ => throw .deepRecursion
+      whnfCore := fun _ _ _ _ _ => throw .deepRecursion
+      whnf := fun _ _ _ => throw .deepRecursion
       inferType := fun _ _ => throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun _n t s l T => isDefEqCore' _n t s l T (withFuel n)
-      whnfCore := fun e l r p => whnfCore' e l r p (withFuel n)
-      whnf := fun e l => whnf' e l (withFuel n)
+      whnfCore := fun e l r p f => whnfCore' e l r p (fun e => f e) (withFuel n)
+      whnf := fun e l f => whnf' e l (fun e => f e) (withFuel n)
       inferType := fun e i => inferType' e i (withFuel n) }
 
 def RecM.run (x : RecM α) : M α := x (Methods.withFuel 1000)
