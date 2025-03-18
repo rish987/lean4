@@ -6,85 +6,14 @@ import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 import Lean4Lean.ContT
+import Lean4Lean.Ext
 import Lean.Meta.Tactic.DfEq
 import Lean.Meta.Tactic.Rewrite
 import Lean.Meta.Tactic.Apply
 import Lean.Meta.Tactic.Replace
 import Lean.Meta.Tactic.Refl
 
-namespace Lean
-
-abbrev InferCache := ExprMap Expr
-
-structure TypeChecker.State where
-  ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
-  inferTypeI : InferCache := {}
-  inferTypeC : InferCache := {}
-  whnfCoreCache : ExprMap Expr := {}
-  whnfCache : ExprMap Expr := {}
-  eqvManager : EquivManager := {}
-  failure : Std.HashSet (Expr × Expr) := {}
-
-structure TypeChecker.Context where
-  env : Kernel.Environment
-  env' : Environment
-  lctx : LocalContext := {}
-  options : Options := default
-  fuel : Nat := 5
-  safety : DefinitionSafety := .safe
-  lparams : List Name := []
-
-namespace TypeChecker
-
-abbrev M := ReaderT Context <| StateT State <| EIO KernelException
-abbrev MO (T : Type) := ContT T M
-
-def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {}) (options : Options)
-    (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : EIO KernelException α :=
-  x { env, env', safety, lctx, fuel, options } |>.run' {}
-
--- instance : MonadEnv M where
---   getEnv := return (← read).env
---   modifyEnv _ := pure ()
-
-def getKEnv : M Kernel.Environment := return (← read).env
-
-instance : MonadLCtx M where
-  getLCtx := return (← read).lctx
-
-instance [Monad m] : MonadNameGenerator (StateT State m) where
-  getNGen := return (← get).ngen
-  setNGen ngen := modify fun s => { s with ngen }
-
-instance (priority := low) : MonadWithReaderOf LocalContext M where
-  withReader f := withReader fun s => { s with lctx := f s.lctx }
-
-structure Methods where
-  isDefEqCore : Nat → Expr → Expr → Level → Expr → MO T Bool
-  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnf (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
-  inferType (e : Expr) (inferOnly : Bool) : MO T Expr
-
-abbrev RecM := ReaderT Methods M
-abbrev RecMO (T : Type) := ContT T RecM
-abbrev RecMB := ContT Bool RecM
-
--- TODO can this be derived from a more general rule?
-instance (priority := low) : MonadWithReaderOf LocalContext RecM where
-  withReader f m := fun b c => m b ({c with lctx := f c.lctx})
-
--- TODO can this be derived from a more general rule?
-instance (priority := low) : MonadWithReaderOf LocalContext (RecMO T) where
-  withReader f m := fun b meths c => m b meths ({c with lctx := f c.lctx})
-
-inductive ReductionStatus where
-  | continue (tn sn : Expr)
-  | unknown (tn sn : Expr)
-  | bool (b : Bool)
-
-namespace Inner
-
-def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf e d fun e => f e m
+namespace Lean.TypeChecker.Inner
 
 @[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
@@ -131,8 +60,6 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
       checkLevel tc l
   return info.instantiateTypeLevelParams ls
 
-def inferType (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType e inferOnly fun a => f a m
-
 def inferLambda (e : Expr) (inferOnly : Bool) : RecMO T Expr := loop #[] e where
   loop fvars : Expr → RecMO T Expr
   | .lam name dom body bi => do
@@ -164,13 +91,6 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecMO T Expr := loop #[] #[] e w
     let s ← ensureSortCore r e
     return .sort <| us.foldr mkLevelIMax' s.sortLevel!
 
-def isDefEqCore (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := fun f m => m.isDefEqCore n t s l T (fun a => f a m)
-
-def isDefEq (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := do
-  let r ← isDefEqCore n t s l T
-  if r then
-    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
-  pure r
 
 def inferApp (e : Expr) : RecMO T Expr := do
   e.withApp fun f args => do
@@ -198,6 +118,12 @@ def markUsed (n : Nat) (fvars : Array Expr) (b : Expr) (used : Array Bool) : Arr
             modify (·.set! i true)
             return false
       return true
+
+def isDefEq (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := do
+  let r ← isDefEqCore n t s l T
+  if r then
+    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+  pure r
 
 def inferLet (e : Expr) (inferOnly : Bool) : RecMO T Expr := loop #[] #[] e where
   loop fvars vals : Expr → RecMO T Expr
@@ -321,10 +247,6 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecMO T Expr := do
     { s with inferTypeC := s.inferTypeC.insert e r }
   return r
 
-def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
-  -- TODO what exactly is going on here?
-  fun f m => m.whnfCore e l cheapRec cheapProj fun e => f e m
-
 def reduceRecursor (e : Expr) (l : Option (Level × Expr) := none) (cheapRec cheapProj : Bool) : RecMO T (Option Expr) := do
   let env ← getKEnv
   if env.quotInit then
@@ -399,98 +321,6 @@ def whnfCoreNoExt' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := 
     else
       save e
 
-def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
-  match m x with
-  | .ok s I => .ok (.inl s) I
-  | .error e I => .ok (.inr e) I
-
-def runMetaM (m : MetaM T) : RecM T := do
-  let mut options := (← readThe Context).options
-  let m' := Lean.Meta.MetaM.run m {lctx := (← readThe Context).lctx, fuel := (← readThe Context).fuel - 1} |>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'}
-  match ← toKernelException m' with
-  | .inl ((reqs, _), _) => pure reqs
-  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
-  | .inr (.error _ d) => throw $ .other (← d.toString)
-
-open Lean.Meta in
-def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO T (Option (Expr × List Expr)) := do
-  if (← readThe Context).fuel == 0 then
-    return none
-  -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
-  -- let localDfEqs := (← readThe Context).localDfEqs
-  -- if dbg then 
-  --   dbg_trace s!"DBG[387]: TypeChecker.lean:406 (after if dbg then)"
-
-  let ret? ← runMetaM (do
-    let mut localLems := []
-    for decl in (← getLCtx) do
-      if dbg then 
-        dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
-      if let .app (.const n []) _ := decl.type.getForallBody then -- TODO remove once we can generate lemmas for intermediate reducts
-        if n == localMarker then
-          let newType ← forallTelescope decl.type fun vs b => mkForallFVars vs b.appArg!
-          localLems := localLems ++ [(decl.toExpr, .some newType)]
-          if dbg then 
-            dbg_trace s!"Added: {decl.userName} : {← ppExpr decl.type}"
-
-    let mut candidates := (← lems.mapM (mkConstWithFreshMVarLevels ·)).zip (List.replicate lems.length none)
-    candidates := candidates ++ localLems
-    withLCtx' (← read).lctx do
-      let (T, _) ← getT
-      let condString := s!"{← ppExpr $ ← T.mvarId!.getType}"
-      -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
-      trace[Kernel.ext] "Trying to show {condString}"
-      let tryExtEq lem type? T ts := do
-        try
-          trace[Kernel.ext] s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          let gs ← T.mvarId!.apply lem (cfg := {shallow := true}) type?
-
-          trace[Kernel.ext] s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
-          if dbg then
-            dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {condString}\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
-          for g in gs do
-            -- TODO unassign T if any g.refl fails?
-            try
-              trace[Kernel.ext] s!"Trying reflection: {← ppExpr $ ← g.getType}"
-              g.refl
-              trace[Kernel.ext] s!"Reflection OK: {← ppExpr $ ← g.getType}"
-            catch e =>
-              trace[Kernel.ext] s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
-              throw e
-          trace[Kernel.ext] s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType}"
-          let TInst ← instantiateMVars T
-          let tsInst ← ts.mapM fun t => instantiateMVars t
-          return some (TInst, tsInst)
-        catch e =>
-          trace[Kernel.ext] s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          if dbg then
-            dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {condString}"
-          pure none
-      for (lem, type?) in candidates do
-        -- for eqMvar in [tEqsMvar, sEqtMvar] do
-        -- TODO is there a way to "undo" assignments from previous failed unification attempts,
-        -- rather than making new mvars every time?
-        let (T, ts) ← getT
-        if let .some prf ← tryExtEq lem type? T ts then
-          printTraces
-          return some prf
-      trace[Kernel.ext] "Showing FAIL: {← ppExpr $ ← T.mvarId!.getType}"
-      printTraces
-      return none
-    )
-
-  if let some (prf, ts) := ret? then
-    if prf.hasExprMVar then
-      throw $ .other "unexpected mvar found in extensional equality proof"
-    if ts.any (·.hasExprMVar) then
-      throw $ .other "unexpected mvar found in extensionally assigned variable"
-    -- check that the proof returned by unification is well-typed with the kernel itself,
-    -- to minimize the trust that we place on unification
-    _ ← inferType prf (inferOnly := false)
-    return some (prf, ts)
-
-  return none
-
 open Lean.Meta in
 def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMO T (Option Expr) := do
   let (l, T) := d
@@ -503,6 +333,8 @@ def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMO T (Op
     return .some ts[0]!
   return none
 
+def ext : Bool := true
+
 def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr := do
   let l ← l.getDM (getTypeInfo e)
   let e' ← whnfCoreNoExt' e l cheapRec cheapProj
@@ -513,10 +345,13 @@ def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false
       false
   -- if dbg then
   --   dbg_trace s!"DBG[376]: TypeChecker.lean:484 {e'}"
-  if let .some e' ← reduceExt e' l dbg then
+  if ext then
+    if let .some e' ← reduceExt e' l dbg then
     -- if dbg then
     --   dbg_trace s!"DBG[377]: TypeChecker.lean:487 {e'}"
-    whnfCore e' l cheapRec cheapProj
+      whnfCore e' l cheapRec cheapProj
+    else
+      pure e'
   else
     pure e'
 
@@ -913,9 +748,10 @@ def isDefEqCore' (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool :=
   -- if dbg then
   --   dbg_trace s!"DBG[370]: TypeChecker.lean:877 (after return r == .true)"
 
-  let r' ← isDefEqExt t s l T
-  if r' != .undef then
-    return r' == .true
+  if ext then
+    let r' ← isDefEqExt t s l T
+    if r' != .undef then
+      return r' == .true
 
   -- if dbg then
   --   dbg_trace s!"DBG[371]: TypeChecker.lean:884 (after return r == .true)"

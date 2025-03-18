@@ -461,9 +461,10 @@ def sanitizeNames (lctx : LocalContext) : StateM NameSanitizerState LocalContext
   if !getSanitizeNames st.options then pure lctx else
     StateT.run' (s := ({} : NameSet)) <|
       lctx.decls.size.foldRevM (init := lctx) fun i _ lctx => do
-        match lctx.decls[i]! with
-        | none      => pure lctx
-        | some decl =>
+        match lctx.decls[i]? with
+        | .some none      =>
+          pure lctx
+        | .some (some decl) =>
           if decl.userName.hasMacroScopes || (← get).contains decl.userName then do
             modify fun s => s.insert decl.userName
             let userNameNew ← liftM <| sanitizeName decl.userName
@@ -471,6 +472,8 @@ def sanitizeNames (lctx : LocalContext) : StateM NameSanitizerState LocalContext
           else
             modify fun s => s.insert decl.userName
             pure lctx
+        | .none =>
+          unreachable!
 
 /--
 Given an `FVarId`, this function returns the corresponding user name,
