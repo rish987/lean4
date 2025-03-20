@@ -4190,7 +4190,7 @@ This is used to keep track of the location where we are working; if an exception
 is thrown, the `ref` gives the location where the error will be reported,
 assuming no more specific location is provided.
 -/
-class MonadRef (m : Type → Type) where
+class MonadRef (m : Type → Type v) where
   /-- Get the current value of the `ref` -/
   getRef      : m Syntax
   /-- Run `x : m α` with a modified value for the `ref` -/
@@ -4198,7 +4198,7 @@ class MonadRef (m : Type → Type) where
 
 export MonadRef (getRef)
 
-instance (m n : Type → Type) [MonadLift m n] [MonadFunctor m n] [MonadRef m] : MonadRef n where
+instance (m : Type → Type u) (n : Type → Type v) [MonadLift m n] [MonadFunctor m n] [MonadRef m] : MonadRef n where
   getRef        := liftM (getRef : m _)
   withRef ref x := monadMap (m := m) (MonadRef.withRef ref) x
 
@@ -4240,7 +4240,7 @@ def withRef? [Monad m] [MonadRef m] {α} (ref? : Option Syntax) (x : m α) : m �
     elaboration). We also apply the position of the result of `getRef` to each
     introduced symbol, which results in better error positions than not applying
     any position. -/
-class MonadQuotation (m : Type → Type) extends MonadRef m where
+class MonadQuotation (m : Type → Type u) extends MonadRef m where
   /-- Get the fresh scope of the current macro invocation -/
   getCurrMacroScope : m MacroScope
   /-- Get the module name of the current file. This is used to ensure that
@@ -4579,7 +4579,7 @@ instance : MonadQuotation MacroM where
   withFreshMacroScope   := Macro.withFreshMacroScope
 
 /-- The opaque methods that are available to `MacroM`. -/
-structure Methods where
+structure Methods : Type where
   /-- Expands macros in the given syntax. A return value of `none` means there
   was nothing to expand. -/
   expandMacro?      : Syntax → MacroM (Option Syntax)

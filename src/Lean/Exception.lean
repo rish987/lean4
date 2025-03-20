@@ -44,15 +44,15 @@ instance : Inhabited Exception := ⟨Exception.error default default⟩
    The default instance just uses `AddMessageContext`.
    In error messages, we may want to provide additional information (e.g., macro expansion stack),
    and refine the `(ref : Syntax)`. -/
-class AddErrorMessageContext (m : Type → Type) where
+class AddErrorMessageContext (m : Type → Type u) where
   add : Syntax → MessageData → m (Syntax × MessageData)
 
-instance (m : Type → Type) [AddMessageContext m] [Monad m] : AddErrorMessageContext m where
+instance (m : Type → Type u) [AddMessageContext m] [Monad m] : AddErrorMessageContext m where
   add ref msg := do
     let msg ← addMessageContext msg
     pure (ref, msg)
 
-class abbrev MonadError (m : Type → Type) :=
+class abbrev MonadError (m : Type → Type u) :=
   MonadExceptOf Exception m
   MonadRef m
   AddErrorMessageContext m

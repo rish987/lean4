@@ -490,7 +490,7 @@ def indentD (msg : MessageData) : MessageData :=
 def indentExpr (e : Expr) : MessageData :=
   indentD e
 
-class AddMessageContext (m : Type → Type) where
+class AddMessageContext (m : Type → Type u) where
   /--
   Without context, a `MessageData` object may be missing information
   (e.g. hover info) for pretty printing, or may print an error. Hence,

@@ -1,9 +1,9 @@
-def ContT (r : Type u) (m : Type u → Type v) (α : Type w) :=
+def ContT (r : Type) (m : Type → Type u) (α : Type) :=
   (α → m r) → m r
 
 namespace ContT
 
-variable {r : Type u} {m : Type u → Type v} {α β : Type w}
+variable {r : Type} {m : Type → Type v} {α β : Type}
 
 def run : ContT r m α → (α → m r) → m r :=
   id
@@ -57,5 +57,10 @@ instance (ε) [MonadExcept ε m] : MonadExcept ε (ContT r m) where
 
 def dud [Monad m] (c : ContT r m r) : ContT T m r := do
   liftM $ ContT.run' c
+
+-- instance [Monad m] [Monad m] : MonadControl m (ContT T m) where
+--   stM      := fun x => T
+--   liftWith f := do monadLift (f (fun x => liftM x))
+--   restoreM x _ := x
 
 end ContT
