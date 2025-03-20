@@ -141,9 +141,9 @@ def extMatch (getT : MetaM (Expr × List Expr)) (localMarker : Name) (lems : Lis
 
   if let some (prf, ts) := ret? then
     if prf.hasExprMVar then
-      Lean.throwError "unexpected mvar found in extensional equality proof"
+      throwError "unexpected mvar found in extensional equality proof"
     if ts.any (·.hasExprMVar) then
-      throw $ .other "unexpected mvar found in extensionally assigned variable"
+       throwError "unexpected mvar found in extensionally assigned variable"
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on unification
     _ ← inferType prf (inferOnly := false)

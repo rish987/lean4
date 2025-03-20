@@ -62,5 +62,13 @@ def dud [Monad m] (c : ContT r m r) : ContT T m r := do
 --   stM      := fun x => T
 --   liftWith f := do monadLift (f (fun x => liftM x))
 --   restoreM x _ := x
+--
+
+instance [Monad m] (ε) [MonadExceptOf ε m] : MonadExceptOf ε (ContT ρ m) where
+  throw e  := liftM (m := m) (throw e)
+  tryCatch := fun x c r => tryCatchThe ε (x r) (fun e => (c e) r)
+
+instance (ρ m) : MonadFunctor m (ContT ρ m) where
+  monadMap f x := fun ctx => f (x ctx)
 
 end ContT

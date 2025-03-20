@@ -104,13 +104,3 @@ def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false)
 def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf e d fun e => f e m
 
 def inferType (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType e inferOnly fun a => f a m
-
-set_option trace.Meta.synthInstance true in
-instance : MonadQuotation RecM :=
-  inferInstance
-#print instMonadQuotationOfMonadFunctorOfMonadLift
-instance : MonadError Lean.Elab.Tactic.TacticM :=
-  inferInstance
-set_option pp.explicit true in
--- #print instAddErrorMessageContextOfAddMessageContextOfMonad
-#print Lean.TypeChecker.Inner.instMonadErrorTacticM_lean4Lean
