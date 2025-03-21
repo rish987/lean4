@@ -338,7 +338,7 @@ structure MetavarContext where
 instance : Inhabited MetavarContext := ⟨{}⟩
 
 /-- A monad with a stateful metavariable context, defining `getMCtx` and `modifyMCtx`. -/
-class MonadMCtx (m : Type → Type) where
+class MonadMCtx (m : Type → Type u) where
   getMCtx    : m MetavarContext
   modifyMCtx : (MetavarContext → MetavarContext) → m Unit
 

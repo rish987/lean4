@@ -72,7 +72,7 @@ structure TraceState where
 
 builtin_initialize inheritedTraceOptions : IO.Ref (Std.HashSet Name) ← IO.mkRef ∅
 
-class MonadTrace (m : Type → Type) where
+class MonadTrace (m : Type → Type u) where
   modifyTraceState : (TraceState → TraceState) → m Unit
   getTraceState    : m TraceState
 
@@ -82,7 +82,7 @@ instance (m n) [MonadLift m n] [MonadTrace m] : MonadTrace n where
   modifyTraceState := fun f => liftM (modifyTraceState f : m _)
   getTraceState    := liftM (getTraceState : m _)
 
-variable {α : Type} {m : Type → Type} [Monad m] [MonadTrace m] [MonadOptions m] [MonadLiftT IO m]
+variable {α : Type} {m : Type → Type u} {m' : Type → Type} [Monad m] [MonadTrace m] [MonadOptions m] [MonadLiftT IO m]
 
 def printTraces : m Unit := do
   for {msg, ..} in (← getTraceState).traces do
@@ -233,14 +233,14 @@ instance : MonadAlwaysExcept ε (EIO ε) where
 instance [always : MonadAlwaysExcept ε m] : MonadAlwaysExcept ε (StateT σ m) where
   except := let _ := always.except; inferInstance
 
-instance [always : MonadAlwaysExcept ε m] : MonadAlwaysExcept ε (StateRefT' ω σ m) where
+instance [always : MonadAlwaysExcept ε m'] : MonadAlwaysExcept ε (StateRefT' ω σ m') where
   except := let _ := always.except; inferInstance
 
 instance [always : MonadAlwaysExcept ε m] : MonadAlwaysExcept ε (ReaderT ρ m) where
   except := let _ := always.except; inferInstance
 
-instance [always : MonadAlwaysExcept ε m] [STWorld ω m] [BEq α] [Hashable α] :
-    MonadAlwaysExcept ε (MonadCacheT α β m) where
+instance [always : MonadAlwaysExcept ε m'] [STWorld ω m'] [BEq α] [Hashable α] :
+    MonadAlwaysExcept ε (MonadCacheT α β m') where
   except := let _ := always.except; inferInstance
 
 def withTraceNode [always : MonadAlwaysExcept ε m] [MonadLiftT BaseIO m] (cls : Name)

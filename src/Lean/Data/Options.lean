@@ -63,7 +63,7 @@ def getOptionDescr (name : Name) : IO String := do
   let decl ← getOptionDecl name
   pure decl.descr
 
-class MonadOptions (m : Type → Type) where
+class MonadOptions (m : Type → Type u) where
   getOptions : m Options
 
 export MonadOptions (getOptions)
@@ -81,7 +81,7 @@ def getNatOption (k : Name) (defValue := 0) : m Nat := do
   let opts ← getOptions
   return opts.getNat k defValue
 
-class MonadWithOptions (m : Type → Type) where
+class MonadWithOptions (m : Type → Type u) where
   withOptions (f : Options → Options) (x : m α) : m α
 
 export MonadWithOptions (withOptions)

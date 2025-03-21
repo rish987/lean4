@@ -1,6 +1,9 @@
 def ContT (r : Type) (m : Type → Type u) (α : Type) :=
   (α → m r) → m r
 
+abbrev ContT' (m : Type → Type u) (α : Type) :=
+  ContT α m α
+
 namespace ContT
 
 variable {r : Type} {m : Type → Type v} {α β : Type}
@@ -8,7 +11,7 @@ variable {r : Type} {m : Type → Type v} {α β : Type}
 def run : ContT r m α → (α → m r) → m r :=
   id
 
-def run' [Monad m] (c : ContT r m r) : m r := do
+def run' [Monad m] (c : ContT' m r) : m r := do
   c.run fun x => do pure x
 
 -- TODO why doesn't this work?
@@ -45,6 +48,9 @@ def monadLift [Monad m] {α} : m α → ContT r m α := fun x f => x >>= f
 instance [Monad m] : MonadLift m (ContT r m) where
   monadLift := ContT.monadLift
 
+instance [Monad m] : MonadLift m (ContT' m) where
+  monadLift := ContT.monadLift
+
 theorem monadLift_bind [Monad m] [LawfulMonad m] {α β} (x : m α) (f : α → m β) :
     (monadLift (x >>= f) : ContT r m β) = monadLift x >>= monadLift ∘ f := by
   ext
@@ -70,5 +76,10 @@ instance [Monad m] (ε) [MonadExceptOf ε m] : MonadExceptOf ε (ContT ρ m) whe
 
 instance (ρ m) : MonadFunctor m (ContT ρ m) where
   monadMap f x := fun ctx => f (x ctx)
+
+instance [Monad m] : MonadControl m (ContT' m) where
+  stM      := id
+  liftWith := fun f => do liftM (f (fun x => x.run'))
+  restoreM s f := s >>= f
 
 end ContT

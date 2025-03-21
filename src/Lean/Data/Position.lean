@@ -41,7 +41,7 @@ structure FileMap where
   positions : Array String.Pos
   deriving Inhabited
 
-class MonadFileMap (m : Type → Type) where
+class MonadFileMap (m : Type → Type u) where
   getFileMap : m FileMap
 
 export MonadFileMap (getFileMap)
