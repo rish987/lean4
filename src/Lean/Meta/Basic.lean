@@ -795,15 +795,17 @@ def whnfForall (e : Expr) : MetaM Expr := do
 protected def withIncRecDepth (x : n α) : n α :=
   mapMetaM (withIncRecDepth (m := MetaM)) x
 
+variable [Monad m] [MonadMCtx m] [MonadNameGenerator m]
+
 private def mkFreshExprMVarAtCore
-    (mvarId : MVarId) (lctx : LocalContext) (localInsts : LocalInstances) (type : Expr) (kind : MetavarKind) (userName : Name) (numScopeArgs : Nat) : MetaM Expr := do
+    (mvarId : MVarId) (lctx : LocalContext) (localInsts : LocalInstances) (type : Expr) (kind : MetavarKind) (userName : Name) (numScopeArgs : Nat) : m Expr := do
   modifyMCtx fun mctx => mctx.addExprMVarDecl mvarId userName lctx localInsts type kind numScopeArgs;
   return mkMVar mvarId
 
 def mkFreshExprMVarAt
     (lctx : LocalContext) (localInsts : LocalInstances) (type : Expr)
     (kind : MetavarKind := MetavarKind.natural) (userName : Name := Name.anonymous) (numScopeArgs : Nat := 0)
-    : MetaM Expr := do
+    : m Expr := do
   mkFreshExprMVarAtCore (← mkFreshMVarId) lctx localInsts type kind userName numScopeArgs
 
 def mkFreshLevelMVar : MetaM Level := do
@@ -873,7 +875,7 @@ def shouldReduceReducibleOnly : MetaM Bool :=
 Return `some mvarDecl` where `mvarDecl` is `mvarId` declaration in the current metavariable context.
 Return `none` if `mvarId` has no declaration in the current metavariable context.
 -/
-def _root_.Lean.MVarId.findDecl? (mvarId : MVarId) : MetaM (Option MetavarDecl) :=
+def _root_.Lean.MVarId.findDecl? (mvarId : MVarId) : m (Option MetavarDecl) := do
   return (← getMCtx).findDecl? mvarId
 
 /--

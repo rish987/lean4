@@ -41,6 +41,11 @@ def _root_.Lean.MVarId.checkNotAssigned (mvarId : MVarId) (tacticName : Name) : 
   if (← mvarId.isAssigned) then
     throwTacticEx tacticName mvarId "metavariable has already been assigned"
 
+variable [Monad m] [MonadMCtx m] 
+
+def _root_.Lean.MVarId.getType? (mvarId : MVarId) : m (Option Expr) :=
+  return (← mvarId.findDecl?).map (·.type)
+
 /-- Get the type the given metavariable. -/
 def _root_.Lean.MVarId.getType (mvarId : MVarId) : MetaM Expr :=
   return (← mvarId.getDecl).type

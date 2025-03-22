@@ -9,21 +9,24 @@ def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Excep
   | .ok s I => .ok (.inl s) I
   | .error e I => .ok (.inr e) I
 
-private def checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
-  if !mvar.isMVar then
-    trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
-    return false
-  else
-    -- must check whether types are definitionally equal or not, before assigning and returning true
-    let mvarType ← inferType mvar
-    let vType ← inferType v
-    if (← Meta.isExprDefEqAux mvarType vType) then
-      mvar.mvarId!.assign v
-      pure true
-    else
-      pure false
-
 def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
+  let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
+    if !mvar.isMVar then
+      -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
+      return false
+    else
+      -- must check whether types are definitionally equal or not, before assigning and returning true
+      let mvarType ← inferType mvar
+      let vType ← inferType v
+      -- TODO ? if there are no metavars, do the normal isDefEq check
+      if (← isExprDefEqShallowImpl mvarType vType) then
+        mvar.mvarId!.assign v
+        pure true
+      else
+        pure false
+  termination_by sizeOf v
+  decreasing_by
+    sorry
   let rec processBinding (lctx : LocalContext) (fvars : Array Expr) (t s : Expr) : RecMO T Bool :=
     let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : RecMO T Bool := do
       let d₁     := d₁.instantiateRev fvars
@@ -39,9 +42,13 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     | .lam     n d₁ b₁ _,    .lam     _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
     | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => isExprDefEqShallowImpl v₁ v₂ <&&> process n d₁ d₂ b₁ b₂
     | _,                  _                  =>
-      withLCtx' lctx do
+      withLCtx lctx do
         isExprDefEqShallowImpl (t.instantiateRev fvars) (s.instantiateRev fvars)
+  termination_by sizeOf t
   decreasing_by
+    sorry
+    sorry
+    sorry
     sorry
   match t, s with
   | .lam .., .lam ..
@@ -65,62 +72,82 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     checkTypesAndAssign t s
   | _, _ =>
     pure false
+  termination_by sizeOf t
+  decreasing_by
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
+    sorry
 
-def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (List MVarId) := do
-  mvarId.checkNotAssigned `apply
-  let targetType ← mvarId.getType
-  let eType      ← eType?.getDM (inferType e)
-  let (numArgs, hasMVarHead) ← getExpectedNumArgsAux eType
-  /-
-  The `apply` tactic adds `_`s to `e`, and some of these `_`s become new goals.
-  When `hasMVarHead` is `false` we try different numbers, until we find a type compatible with `targetType`.
-  We used to try only `numArgs-targetTypeNumArgs` when `hasMVarHead = false`, but this is not always correct.
-  For example, consider the following example
-  ```
-  example {α β} [LE_trans β] (x y z : α → β) (h₀ : x ≤ y) (h₁ : y ≤ z) : x ≤ z := by
-    apply le_trans
-    assumption
-    assumption
-  ```
-  In this example, `targetTypeNumArgs = 1` because `LE` for functions is defined as
-  ```
-  instance {α : Type u} {β : Type v} [LE β] : LE (α → β) where
-    le f g := ∀ i, f i ≤ g i
-  ```
-  -/
-  let rangeNumArgs ← if hasMVarHead then
-    pure [numArgs : numArgs+1]
-  else
-    let targetTypeNumArgs ← getExpectedNumArgs targetType
-    pure [numArgs - targetTypeNumArgs : numArgs+1]
-  /-
-  Auxiliary function for trying to add `n` underscores where `n ∈ [i: rangeNumArgs.stop)`
-  See comment above
-  -/
-  let rec go (i : Nat) : MetaM (Array Expr × Array BinderInfo) := do
-    if i < rangeNumArgs.stop then
-      let s ← saveState
-      let (newMVars, binderInfos, eType) ← forallMetaTelescopeReducing eType i
-      if (← isDefEqApply cfg eType targetType) then
-        return (newMVars, binderInfos)
-      else
-        s.restore
-        go (i+1)
+private def mkFreshExprMVar (type : Expr) (kind : MetavarKind) (userName : Name) : RecMO T Expr := do
+  mkFreshExprMVarAt (← getLCtx) #[] type kind userName
+
+private def forallMetaTelescope (e : Expr) : RecMO T (Array Expr × Expr) :=
+  process #[] e
+where
+  process (mvars : Array Expr) (type : Expr) : RecMO T (Array Expr × Expr) := do
+    match type with
+    | .forallE n d b _ =>
+      let d  := d.instantiateRev mvars
+      let mvar ← mkFreshExprMVar d default n
+      let mvars := mvars.push mvar
+      process mvars b
+    | _ =>
+      let type := type.instantiateRev mvars
+      return (mvars, type)
+
+def forallTelescope
+    (type              : Expr)
+    (k                 : Array Expr → Expr → RecMO T α) : RecMO T α := do
+  let rec process (lctx : LocalContext) (fvars : Array Expr) (j : Nat) (type : Expr) : RecMO T α := do
+    match type with
+    | .forallE n d b bi =>
+      let d     := d.instantiateRevRange j fvars.size fvars
+      let fvarId ← mkFreshFVarId
+      let lctx  := lctx.mkLocalDecl fvarId n d bi
+      let fvar  := mkFVar fvarId
+      let fvars := fvars.push fvar
+      process lctx fvars j b
+    | _ =>
+      let type := type.instantiateRevRange j fvars.size fvars;
+      withLCtx lctx do
+        withNewLocalInstancesImp fvars j do
+            k fvars type
+  process (← getLCtx) #[] 0 type
+
+def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (Array MVarId) := do
+  let some targetType ← mvarId.getType? | unreachable!
+  let eType ← eType?.getDM (inferType e)
+
+  -- let rec getNumArgs e := do match e with
+  -- | .forallE _ _ b _ => pure $ 1 + (← getNumArgs b)
+  -- | _ => pure 0
+  -- let numArgs ← getNumArgs eType
+  -- let targetTypeNumArgs ← getNumArgs targetType
+  -- assert! targetTypeNumArgs == 0
+
+  let rec go : RecMO T (Array Expr) := do
+    let (newMVars, eType) ← forallMetaTelescope eType
+    if (← isExprDefEqShallowImpl eType targetType) then
+      return newMVars
     else
-      let (_, _, eType) ← forallMetaTelescopeReducing eType (some rangeNumArgs.start)
-      throwError "apply error: {mvarId} {eType} {targetType}"
-    termination_by rangeNumArgs.stop - i
-  let (newMVars, binderInfos) ← go rangeNumArgs.start
-  postprocessAppMVars `apply mvarId newMVars binderInfos cfg.synthAssignedInstances cfg.allowSynthFailures
-  let e ← instantiateMVars e
+      throw $ .other "apply error: {mvarId} {eType} {targetType}"
+  let newMVars ← go
+  -- postprocessAppMVars `apply mvarId newMVars binderInfos cfg.synthAssignedInstances cfg.allowSynthFailures
+  assert! not e.hasMVar
   mvarId.assign (mkAppN e newMVars)
   let newMVars ← newMVars.filterM fun mvar => not <$> mvar.mvarId!.isAssigned
-  let otherMVarIds ← getMVarsNoDelayed e
-  let newMVarIds ← reorderGoals newMVars cfg.newGoals
-  let otherMVarIds := otherMVarIds.filter fun mvarId => !newMVarIds.contains mvarId
-  let result := newMVarIds ++ otherMVarIds.toList
-  result.forM (·.headBetaType)
-  return result
+  let newMVarIds := newMVars.map fun m => m.mvarId!
+  return newMVarIds
+
+def ppExpr (e : Expr) : RecMO T Format := sorry
 
 def extMatch (T : Expr) (ts : (List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
 

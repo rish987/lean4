@@ -11,6 +11,7 @@ import Lean.Meta.Tactic.Rewrite
 import Lean.Meta.Tactic.Apply
 import Lean.Meta.Tactic.Replace
 import Lean.Meta.Tactic.Refl
+import Lean.Meta.Tactic.Util
 
 namespace Lean
 
@@ -24,6 +25,7 @@ structure TypeChecker.State where
   whnfCache : ExprMap Expr := {}
   eqvManager : EquivManager := {}
   failure : Std.HashSet (Expr × Expr) := {}
+  mctx : MetavarContext := default
 
 structure TypeChecker.Context where
   env : Kernel.Environment
@@ -36,22 +38,26 @@ structure TypeChecker.Context where
 
 namespace TypeChecker
 
-instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
-  inferInstance
+-- instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
+--   inferInstance
+--
+-- instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
+--   inferInstance
 
-instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
-  inferInstance
+abbrev M := ReaderT Context <| StateT State <| EIO KernelException
 
-abbrev M := ReaderT Context <| StateT State <| MetaM
-
-instance : MonadControlT MetaM (M) :=
-  inferInstance
+-- instance : MonadControlT MetaM (M) :=
+--   inferInstance
 
 abbrev MO (T : Type) := ContT T M
 
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {}) (options : Options)
-    (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : MetaM α :=
+    (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : EIO KernelException α :=
   x { env, env', safety, lctx, fuel, options } |>.run' {}
+
+instance : MonadMCtx M where
+  getMCtx    := return (← get).mctx
+  modifyMCtx f := modify fun s => { s with mctx := f s.mctx }
 
 -- instance : MonadEnv M where
 --   getEnv := return (← read).env
@@ -105,8 +111,11 @@ def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f
 
 def inferType (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType e inferOnly fun a => f a m
 
-instance : MonadTrace (RecMO T) :=
-  inferInstance
+@[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
+  withReader (fun _ => lctx) x
 
-instance : MonadMCtx (RecMO T) :=
-  inferInstance
+-- instance : MonadTrace (RecMO T) :=
+--   inferInstance
+--
+-- instance : MonadMCtx (RecMO T) :=
+--   inferInstance

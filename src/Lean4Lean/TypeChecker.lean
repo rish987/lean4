@@ -15,9 +15,6 @@ import Lean.Meta.Tactic.Refl
 
 namespace Lean.TypeChecker.Inner
 
-@[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
-  withReader (fun _ => lctx) x
-
 -- def noProp
 
 def ensureSortCore (e : Expr) (s : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := ContT.dud do
