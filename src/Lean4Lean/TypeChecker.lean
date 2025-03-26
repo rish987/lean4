@@ -318,11 +318,10 @@ def whnfCoreNoExt' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := 
     else
       save e
 
-open Lean.Meta in
 def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMO T (Option Expr) := do
   let (l, T) := d
   let getVars := do
-    let sMvar ← Lean.Meta.mkFreshExprMVar T
+    let sMvar ← mkFreshExprMVar T
     let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
     let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
     pure (eqMvar, [sMvar])

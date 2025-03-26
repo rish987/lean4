@@ -1724,7 +1724,7 @@ opaque check (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalC
 
 end Kernel
 
-class MonadEnv (m : Type → Type) where
+class MonadEnv (m : Type → Type u) where
   getEnv    : m Environment
   modifyEnv : (Environment → Environment) → m Unit
 

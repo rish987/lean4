@@ -89,8 +89,11 @@ private partial def mkAuxNameAux (env : Environment) (base : Name) (i : Nat) : N
 def mkAuxName [Monad m] [MonadEnv m] (baseName : Name) (idx : Nat) : m Name := do
   return mkAuxNameAux (← getEnv) baseName idx
 
+def getConstInfo? [Monad m] [MonadEnv m] (constName : Name) : m (Option ConstantInfo) := do
+  pure $ (← getEnv).find? constName
+
 def getConstInfo [Monad m] [MonadEnv m] [MonadError m] (constName : Name) : m ConstantInfo := do
-  match (← getEnv).find? constName with
+  match ← getConstInfo? constName with
   | some info => pure info
   | none      => throwError "unknown constant '{.ofConstName constName}'"
 

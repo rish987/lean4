@@ -2,8 +2,6 @@ import Lean4Lean.RecM
 
 namespace Lean.TypeChecker.Inner
 
-open Lean.Meta
-
 def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Exception) := fun x =>
   match m x with
   | .ok s I => .ok (.inl s) I
@@ -86,10 +84,10 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     sorry
     sorry
 
-private def mkFreshExprMVar (type : Expr) (kind : MetavarKind) (userName : Name) : RecMO T Expr := do
-  mkFreshExprMVarAt (← getLCtx) #[] type kind userName
+def mkFreshExprMVar (type : Expr) (kind : MetavarKind) (userName : Name) : RecMO T Expr := do
+  Lean.Meta.mkFreshExprMVarAt (← getLCtx) #[] type kind userName
 
-private def forallMetaTelescope (e : Expr) : RecMO T (Array Expr × Expr) :=
+def forallMetaTelescope (e : Expr) : RecMO T (Array Expr × Expr) :=
   process #[] e
 where
   process (mvars : Array Expr) (type : Expr) : RecMO T (Array Expr × Expr) := do
@@ -118,12 +116,13 @@ def forallTelescope
     | _ =>
       let type := type.instantiateRevRange j fvars.size fvars;
       withLCtx lctx do
-        withNewLocalInstancesImp fvars j do
-            k fvars type
+        k fvars type
   process (← getLCtx) #[] 0 type
 
-def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (Array MVarId) := do
-  let some targetType ← mvarId.getType? | unreachable!
+variable {m : Type → Type u} [Monad m] [MonadMCtx m] 
+
+def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (Option (Array MVarId)) := do
+  let some targetType ← mvarId.getType? (m := RecMO T) | unreachable!
   let eType ← eType?.getDM (inferType e)
 
   -- let rec getNumArgs e := do match e with
@@ -133,13 +132,13 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T 
   -- let targetTypeNumArgs ← getNumArgs targetType
   -- assert! targetTypeNumArgs == 0
 
-  let rec go : RecMO T (Array Expr) := do
+  let newMVars : Array Expr ← do
     let (newMVars, eType) ← forallMetaTelescope eType
-    if (← isExprDefEqShallowImpl eType targetType) then
-      return newMVars
+    if not (← isExprDefEqShallowImpl eType targetType) then
+      return none
     else
-      throw $ .other "apply error: {mvarId} {eType} {targetType}"
-  let newMVars ← go
+      pure newMVars
+
   -- postprocessAppMVars `apply mvarId newMVars binderInfos cfg.synthAssignedInstances cfg.allowSynthFailures
   assert! not e.hasMVar
   mvarId.assign (mkAppN e newMVars)
@@ -149,7 +148,7 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T 
 
 def ppExpr (e : Expr) : RecMO T Format := sorry
 
-def extMatch (T : Expr) (ts : (List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
+def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
 
   if (← readThe Context).fuel == 0 then
     return none
@@ -165,60 +164,62 @@ def extMatch (T : Expr) (ts : (List Expr)) (localMarker : Name) (lems : List Nam
         dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
       if let .app (.const n []) _ := decl.type.getForallBody then -- TODO remove once we can generate lemmas for intermediate reducts
         if n == localMarker then
-          let newType ← liftM $ forallTelescope decl.type fun vs b => mkForallFVars vs b.appArg!
+          let newType ← forallTelescope decl.type fun vs b => do pure $ (← getLCtx).mkForall vs b.appArg!
           localLems := localLems ++ [(decl.toExpr, .some newType)]
           if dbg then 
             dbg_trace s!"Added: {decl.userName} : {← ppExpr decl.type}"
 
-    let mut candidates := (← lems.mapM (mkConstWithFreshMVarLevels ·)).zip (List.replicate lems.length none)
+    let lemInfos ← lems.mapM (fun l => do
+        let some info := (← getKEnv).find? l | throw $ .other s!"failed to find extensional lemma {l} in environment"
+        pure info
+      )
+    let mut candidates := (← lemInfos.mapM (Lean.Meta.mkConstWithFreshMVarLevels' ·)).zip (List.replicate lems.length none)
     candidates := candidates ++ localLems
     let tryExtEq {U} lem type? (T : Expr) (ts : List Expr) : RecMO U (Option (Expr × List Expr)) := do
-      let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType}"
+      -- let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
-      trace[Kernel.ext] "Trying to show {← condString}"
-      try
-        trace[Kernel.ext] s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
-        let gs ← apply T.mvarId! lem type?
+      -- trace[Kernel.ext] "Trying to show {← condString}"
+      -- trace[Kernel.ext] s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
+      let some gs ← apply T.mvarId! lem type? | 
+        -- trace[Kernel.ext] s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
+        -- if dbg then
+        --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
+        return none
 
-        trace[Kernel.ext] s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
-        if dbg then
-          dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
-        for g in gs do
-          -- TODO unassign T if any g.refl fails?
-          try
-            trace[Kernel.ext] s!"Trying reflection: {← ppExpr $ ← g.getType}"
-            g.refl
-            trace[Kernel.ext] s!"Reflection OK: {← ppExpr $ ← g.getType}"
-          catch e =>
-            trace[Kernel.ext] s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
-            throw e
-        trace[Kernel.ext] s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType}"
-        let TInst ← instantiateMVars T
-        let tsInst ← ts.mapM (fun t => instantiateMVars t)
-        return some (TInst, tsInst)
-      catch e =>
-        trace[Kernel.ext] s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
-        if dbg then
-          dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
-        pure none
+      -- trace[Kernel.ext] s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      -- if dbg then
+      --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      for g in gs do
+        let .some gT ← g.getType? | unreachable!
+        let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"extensional hypothesis not of expected form: {gT}"
+        -- trace[Kernel.ext] s!"Trying reflection: {← ppExpr $ ← g.getType}"
+        if not (← isDefEqCore 999 lhs rhs l T) then
+          -- trace[Kernel.ext] s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
+          return none
+        -- trace[Kernel.ext] s!"Reflection OK: {← ppExpr $ ← g.getType}"
+      -- trace[Kernel.ext] s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType}"
+      let TInst ← instantiateMVars T
+      let tsInst ← ts.mapM (fun t => instantiateMVars t)
+      return some (TInst, tsInst)
 
     for (lem, type?) in candidates do
+      let (T, ts) ← getT
       -- for eqMvar in [tEqsMvar, sEqtMvar] do
       -- TODO is there a way to "undo" assignments from previous failed unification attempts,
       -- rather than making new mvars every time?
       if let .some prf ← tryExtEq lem type? T ts then
-        printTraces
+        -- printTraces
         return some prf
-    trace[Kernel.ext] "Showing FAIL: {← ppExpr $ ← T.mvarId!.getType}"
-    printTraces
+    -- trace[Kernel.ext] "Showing FAIL: {← ppExpr $ ← T.mvarId!.getType}"
+    -- printTraces
     return none
     )
 
   if let some (prf, ts) := ret? then
     if prf.hasExprMVar then
-      throwError "unexpected mvar found in extensional equality proof"
+      throw $ .other "unexpected mvar found in extensional equality proof"
     if ts.any (·.hasExprMVar) then
-       throwError "unexpected mvar found in extensionally assigned variable"
+      throw $ .other "unexpected mvar found in extensionally assigned variable"
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on unification
     _ ← inferType prf (inferOnly := false)

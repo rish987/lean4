@@ -795,7 +795,7 @@ def whnfForall (e : Expr) : MetaM Expr := do
 protected def withIncRecDepth (x : n α) : n α :=
   mapMetaM (withIncRecDepth (m := MetaM)) x
 
-variable [Monad m] [MonadMCtx m] [MonadNameGenerator m]
+variable {m : Type → Type u} [Monad m] [MonadEnv m] [MonadMCtx m] [MonadNameGenerator m] [MonadError m]
 
 private def mkFreshExprMVarAtCore
     (mvarId : MVarId) (lctx : LocalContext) (localInsts : LocalInstances) (type : Expr) (kind : MetavarKind) (userName : Name) (numScopeArgs : Nat) : m Expr := do
@@ -808,7 +808,7 @@ def mkFreshExprMVarAt
     : m Expr := do
   mkFreshExprMVarAtCore (← mkFreshMVarId) lctx localInsts type kind userName numScopeArgs
 
-def mkFreshLevelMVar : MetaM Level := do
+def mkFreshLevelMVar : m Level := do
   let mvarId ← mkFreshLMVarId
   modifyMCtx fun mctx => mctx.addLevelMVarDecl mvarId;
   return mkLevelMVar mvarId
@@ -846,12 +846,15 @@ def mkFreshExprMVarWithId (mvarId : MVarId) (type? : Option Expr := none) (kind 
     let type ← mkFreshExprMVar (mkSort u)
     mkFreshExprMVarWithIdCore mvarId type kind userName
 
-def mkFreshLevelMVars (num : Nat) : MetaM (List Level) :=
+def mkFreshLevelMVars (num : Nat) : m (List Level) :=
   num.foldM (init := []) fun _ _ us =>
     return (← mkFreshLevelMVar)::us
 
-def mkFreshLevelMVarsFor (info : ConstantInfo) : MetaM (List Level) :=
+def mkFreshLevelMVarsFor (info : ConstantInfo) : m (List Level) :=
   mkFreshLevelMVars info.numLevelParams
+
+def mkConstWithFreshMVarLevels' (info : ConstantInfo) : m Expr := do
+  return mkConst info.name (← mkFreshLevelMVarsFor info)
 
 /--
 Create a constant with the given name and new universe metavariables.
@@ -859,7 +862,7 @@ Example: ``mkConstWithFreshMVarLevels `Monad`` returns `@Monad.{?u, ?v}`
 -/
 def mkConstWithFreshMVarLevels (declName : Name) : MetaM Expr := do
   let info ← getConstInfo declName
-  return mkConst declName (← mkFreshLevelMVarsFor info)
+  mkConstWithFreshMVarLevels' info
 
 /-- Return current transparency setting/mode. -/
 def getTransparency : MetaM TransparencyMode :=
