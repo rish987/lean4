@@ -15,7 +15,7 @@ def runMetaM (m : MetaM T) : RecMO U T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
+def isExprDefEq (t : Expr) (s : Expr) (deep := false) : RecMO T Bool :=
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
@@ -25,7 +25,7 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
       let vType ← inferType v
       let mvarType ← mvar.mvarId!.getType!
       -- TODO ? if there are no metavars, do the normal isDefEq check
-      if (← isExprDefEqShallowImpl mvarType vType) then
+      if (← isExprDefEq mvarType vType) then
         mvar.mvarId!.assign v
         pure true
       else
@@ -37,7 +37,7 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : RecMO T Bool := do
       let d₁     := d₁.instantiateRev fvars
       let d₂     := d₂.instantiateRev fvars
-      if not (← isExprDefEqShallowImpl d₁ d₂) then
+      if not (← isExprDefEq d₁ d₂) then
         return false
       let fvarId ← mkFreshFVarId
       let lctx   := lctx.mkLocalDecl fvarId n d₁
@@ -46,10 +46,10 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     match t, s with
     | .forallE n d₁ b₁ _,    .forallE _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
     | .lam     n d₁ b₁ _,    .lam     _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
-    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => process n d₁ d₂ b₁ b₂ <&&> (do isExprDefEqShallowImpl (← instantiateExprMVars v₁) (← instantiateExprMVars v₂))
+    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => process n d₁ d₂ b₁ b₂ <&&> (do isExprDefEq (← instantiateExprMVars v₁) (← instantiateExprMVars v₂))
     | _,                  _                  =>
       withLCtx lctx do
-        isExprDefEqShallowImpl (t.instantiateRev fvars) (s.instantiateRev fvars)
+        isExprDefEq (t.instantiateRev fvars) (s.instantiateRev fvars)
   termination_by sizeOf t
   decreasing_by
     sorry
@@ -61,20 +61,20 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
   | .forallE .., .forallE ..
   | .letE .., .letE .. => do processBinding (← getLCtx) #[] t s
   | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-  | .mdata _ a1, _ => isExprDefEqShallowImpl a1 s
-  | _, .mdata _ a2 => isExprDefEqShallowImpl t a2
+  | .mdata _ a1, _ => isExprDefEq a1 s
+  | _, .mdata _ a2 => isExprDefEq t a2
   | .lit a1, .lit a2 => pure (a1 == a2)
-  | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEqShallowImpl s s'
+  | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s'
   | .const n ls, .const n' ls' =>
     let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
     pure ret
   | .fvar id, .fvar id' => pure $ id == id'
   | .app f a, .app f' a' => do
-    let feq ← isExprDefEqShallowImpl f f'
+    let feq ← isExprDefEq f f'
     let a ← instantiateMVars a
     let a' ← instantiateMVars a'
     -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
-    let aeq ← isExprDefEqShallowImpl a a'
+    let aeq ← isExprDefEq a a'
     pure $ feq && aeq
   | .bvar .., _ => unreachable!
   | _, .bvar .. => unreachable!
@@ -150,7 +150,7 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T 
 
   let newMVars : Array Expr ← do
     let (newMVars, eType) ← forallMetaTelescope eType
-    if not (← isExprDefEqShallowImpl eType targetType) then
+    if not (← isExprDefEq eType targetType) then
       return none
     else
       pure newMVars

@@ -44,17 +44,18 @@ theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 -- @[rw] -- bad rule leading to non-termination
 -- theorem succComm : Nat.succ n = 1 + n := sorry
 
+def s := Nat.succ
+def z := Nat.zero
+
 -- set_option trace.Kernel.ext true in
 -- example : Nat.add 0 n = n := rfl
-set_option trace.Kernel.ext true in
-example : Nat.add Nat.zero n = n := @Eq.refl _ (Nat.add Nat.zero n)
+-- set_option trace.Kernel.ext true in
+example : Nat.add z n = n := @Eq.refl _ (Nat.add Nat.zero n)
 -- def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
 -- v.cons 1
 
 -- set_option pp.all true in
 -- #print vecTest
-abbrev s := Nat.succ
-abbrev z := Nat.zero
 
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
