@@ -7,6 +7,14 @@ def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Excep
   | .ok s I => .ok (.inl s) I
   | .error e I => .ok (.inr e) I
 
+def runMetaM (m : MetaM T) : RecMO U T := do
+  let mut options := (← readThe Context).options
+  let m' := Lean.Meta.MetaM.run m {lctx := ← getLCtx} {mctx := ← getMCtx}|>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'}
+  match ← toKernelException m' with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
 def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
     if !mvar.isMVar then
@@ -14,8 +22,8 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
       return false
     else
       -- must check whether types are definitionally equal or not, before assigning and returning true
-      let mvarType ← inferType mvar
       let vType ← inferType v
+      let mvarType ← mvar.mvarId!.getType!
       -- TODO ? if there are no metavars, do the normal isDefEq check
       if (← isExprDefEqShallowImpl mvarType vType) then
         mvar.mvarId!.assign v
@@ -34,11 +42,11 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
       let fvarId ← mkFreshFVarId
       let lctx   := lctx.mkLocalDecl fvarId n d₁
       let fvars  := fvars.push (mkFVar fvarId)
-      processBinding lctx fvars b₁ b₂
+      processBinding lctx fvars (← instantiateExprMVars b₁) (← instantiateExprMVars b₂)
     match t, s with
     | .forallE n d₁ b₁ _,    .forallE _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
     | .lam     n d₁ b₁ _,    .lam     _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
-    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => isExprDefEqShallowImpl v₁ v₂ <&&> process n d₁ d₂ b₁ b₂
+    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => process n d₁ d₂ b₁ b₂ <&&> (do isExprDefEqShallowImpl (← instantiateExprMVars v₁) (← instantiateExprMVars v₂))
     | _,                  _                  =>
       withLCtx lctx do
         isExprDefEqShallowImpl (t.instantiateRev fvars) (s.instantiateRev fvars)
@@ -57,9 +65,17 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
   | _, .mdata _ a2 => isExprDefEqShallowImpl t a2
   | .lit a1, .lit a2 => pure (a1 == a2)
   | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEqShallowImpl s s'
-  | .const n ls, .const n' ls' => pure (n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l'))
+  | .const n ls, .const n' ls' =>
+    let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
+    pure ret
   | .fvar id, .fvar id' => pure $ id == id'
-  | .app f a, .app f' a' => isExprDefEqShallowImpl f f' <&&> isExprDefEqShallowImpl a a'
+  | .app f a, .app f' a' => do
+    let feq ← isExprDefEqShallowImpl f f'
+    let a ← instantiateMVars a
+    let a' ← instantiateMVars a'
+    -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
+    let aeq ← isExprDefEqShallowImpl a a'
+    pure $ feq && aeq
   | .bvar .., _ => unreachable!
   | _, .bvar .. => unreachable!
   | .mvar .., .mvar .. => 
@@ -84,7 +100,7 @@ def isExprDefEqShallowImpl (t : Expr) (s : Expr) : RecMO T Bool :=
     sorry
     sorry
 
-def mkFreshExprMVar (type : Expr) (kind : MetavarKind) (userName : Name) : RecMO T Expr := do
+def mkFreshExprMVar (type : Expr) (kind : MetavarKind := default) (userName : Name := default) : RecMO T Expr := do
   Lean.Meta.mkFreshExprMVarAt (← getLCtx) #[] type kind userName
 
 def forallMetaTelescope (e : Expr) : RecMO T (Array Expr × Expr) :=
@@ -146,10 +162,13 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T 
   let newMVarIds := newMVars.map fun m => m.mvarId!
   return newMVarIds
 
-def ppExpr (e : Expr) : RecMO T Format := sorry
+def ppExpr (e : Expr) : RecMO T Format := runMetaM (Lean.Meta.ppExpr e)
 
-def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
+def ext_trace (getS : RecMO T String) : RecMO T Unit := do
+  if let .some (.ofBool true) := (← getOptions).find `trace.Kernel.ext then
+    dbg_trace (← getS)
 
+def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
   if (← readThe Context).fuel == 0 then
     return none
   -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
@@ -160,8 +179,8 @@ def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : L
   let ret? ← (do
     let mut localLems := []
     for decl in (← getLCtx) do
-      if dbg then 
-        dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
+      -- if dbg then 
+      --   dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
       if let .app (.const n []) _ := decl.type.getForallBody then -- TODO remove once we can generate lemmas for intermediate reducts
         if n == localMarker then
           let newType ← forallTelescope decl.type fun vs b => do pure $ (← getLCtx).mkForall vs b.appArg!
@@ -176,28 +195,28 @@ def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : L
     let mut candidates := (← lemInfos.mapM (Lean.Meta.mkConstWithFreshMVarLevels' ·)).zip (List.replicate lems.length none)
     candidates := candidates ++ localLems
     let tryExtEq {U} lem type? (T : Expr) (ts : List Expr) : RecMO U (Option (Expr × List Expr)) := do
-      -- let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType}"
+      let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType!}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
-      -- trace[Kernel.ext] "Trying to show {← condString}"
-      -- trace[Kernel.ext] s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
+      ext_trace do pure s!"Trying to show {← condString}"
+      ext_trace do pure s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType lem)} to {← condString}"
       let some gs ← apply T.mvarId! lem type? | 
-        -- trace[Kernel.ext] s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
+        ext_trace do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType lem)} to {← condString}"
         -- if dbg then
         --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
         return none
 
-      -- trace[Kernel.ext] s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      ext_trace do pure s!"Applying OK:{← ppExpr $ (← inferType lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       -- if dbg then
       --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       for g in gs do
-        let .some gT ← g.getType? | unreachable!
+        let gT ← g.getType!
         let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"extensional hypothesis not of expected form: {gT}"
-        -- trace[Kernel.ext] s!"Trying reflection: {← ppExpr $ ← g.getType}"
+        ext_trace do pure s!"Trying reflection: {← ppExpr $ ← g.getType!}"
         if not (← isDefEqCore 999 lhs rhs l T) then
-          -- trace[Kernel.ext] s!"Reflection FAIL: {← ppExpr $ ← g.getType}"
+          ext_trace do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
           return none
-        -- trace[Kernel.ext] s!"Reflection OK: {← ppExpr $ ← g.getType}"
-      -- trace[Kernel.ext] s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType}"
+        ext_trace do pure s!"Reflection OK: {← ppExpr $ ← g.getType!}"
+      ext_trace do pure s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType!}"
       let TInst ← instantiateMVars T
       let tsInst ← ts.mapM (fun t => instantiateMVars t)
       return some (TInst, tsInst)
@@ -208,10 +227,9 @@ def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : L
       -- TODO is there a way to "undo" assignments from previous failed unification attempts,
       -- rather than making new mvars every time?
       if let .some prf ← tryExtEq lem type? T ts then
-        -- printTraces
         return some prf
-    -- trace[Kernel.ext] "Showing FAIL: {← ppExpr $ ← T.mvarId!.getType}"
-    -- printTraces
+    let (T, _) ← getT
+    ext_trace do pure s!"Showing FAIL: {← ppExpr $ ← T.mvarId!.getType!}"
     return none
     )
 
@@ -226,3 +244,6 @@ def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : L
     return some (prf, ts)
 
   return none
+
+def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) :=
+  extMatch' getT localMarker lems dbg

@@ -26,6 +26,7 @@ structure TypeChecker.State where
   eqvManager : EquivManager := {}
   failure : Std.HashSet (Expr × Expr) := {}
   mctx : MetavarContext := default
+  -- traceState : TraceState := default
 
 structure TypeChecker.Context where
   env : Kernel.Environment
@@ -58,6 +59,13 @@ def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSa
 instance : MonadMCtx M where
   getMCtx    := return (← get).mctx
   modifyMCtx f := modify fun s => { s with mctx := f s.mctx }
+
+instance : MonadOptions M where
+  getOptions := do pure (← read).options
+
+-- instance : MonadTrace M where
+--   modifyTraceState f := do modify fun s => {s with traceState := f s.traceState}
+--   getTraceState := do pure (← get).traceState
 
 -- instance : MonadEnv M where
 --   getEnv := return (← read).env

@@ -46,10 +46,10 @@ theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 
 -- set_option trace.Kernel.ext true in
 -- example : Nat.add 0 n = n := rfl
--- set_option trace.Kernel.ext true in
-example : Nat.zero + n = n := rfl
-def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
-v.cons 1
+set_option trace.Kernel.ext true in
+example : Nat.add Nat.zero n = n := @Eq.refl _ (Nat.add Nat.zero n)
+-- def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
+-- v.cons 1
 
 -- set_option pp.all true in
 -- #print vecTest
@@ -59,7 +59,7 @@ abbrev z := Nat.zero
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
 -- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
-example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
+-- example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x
@@ -73,7 +73,7 @@ example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := 
 -- @[deq]
 -- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
-theorem ex3 (h : ldeq ((x y z : Nat) → (hy : y = 0) → (hz : z = x) → x + y = z)) (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := Eq.refl (c)
+-- theorem ex3 (h : ldeq ((x y z : Nat) → (hy : y = 0) → (hz : z = x) → x + y = z)) (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := Eq.refl (c)
 
 -- example (a b c : Nat) (ha : b = 0) (hc : c = a) : a + b = c := ex a b c ha hc
 -- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry

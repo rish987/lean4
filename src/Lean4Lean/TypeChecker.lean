@@ -38,6 +38,11 @@ def inferFVar (tc : Context) (name : FVarId) : EIO KernelException Expr := do
     return decl.type
   throw <| .other "unknown free variable"
 
+def inferMVar (tc : State) (name : MVarId) : EIO KernelException Expr := do
+  if let some decl := tc.mctx.findDecl? name then
+    return decl.type
+  throw <| .other "unknown meta variable"
+
 def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bool) :
     EIO KernelException Expr := do
   let e := Expr.const name ls
@@ -218,7 +223,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecMO T Expr := do
     | .mdata _ e => inferType' e inferOnly
     | .proj s idx e => inferProj s idx e (← inferType' e inferOnly)
     | .fvar n => inferFVar (← readThe Context) n
-    | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
+    | .mvar n => inferMVar (← get) n
     | .bvar _ => unreachable!
     | .sort l =>
       if !inferOnly then
@@ -318,14 +323,14 @@ def whnfCoreNoExt' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := 
     else
       save e
 
-def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMO T (Option Expr) := do
+def reduceExt (e : Expr) (d : Level × Expr) (dbg : Bool := false) : RecMO U (Option Expr) := do
   let (l, T) := d
   let getVars := do
     let sMvar ← mkFreshExprMVar T
     let tEqs := mkAppN (.const `Eq [l]) #[T, e, sMvar]
-    let eqMvar ← Lean.Meta.mkFreshExprMVar tEqs
+    let eqMvar ← mkFreshExprMVar tEqs
     pure (eqMvar, [sMvar])
-  if let some (_, ts) ← extMatch getVars ``ldrw (DfEq.rwExt.getState (← readThe Context).env') dbg then 
+  if let some (_, ts) ← extMatch getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg then 
     return .some ts[0]!
   return none
 
@@ -342,9 +347,8 @@ def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false
   -- if dbg then
   --   dbg_trace s!"DBG[376]: TypeChecker.lean:484 {e'}"
   if ext then
+    ext_trace do pure s!"DBG[1]: TypeChecker.lean:345: e'={← ppExpr e'}"
     if let .some e' ← reduceExt e' l dbg then
-    -- if dbg then
-    --   dbg_trace s!"DBG[377]: TypeChecker.lean:487 {e'}"
       whnfCore e' l cheapRec cheapProj
     else
       pure e'
@@ -486,16 +490,15 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecMO T Bool :=
   | t, s => isDefEqCheckTypes 20 (t.instantiateRev subst) (s.instantiateRev subst)
 
 def quickIsDefEq (t s : Expr) (l : Level) (T : Expr) (useHash := false) : RecMO U LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 (eqvManager := m)) =>
+  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
     let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 (eqvManager := m))
+    (b, .mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m))
   then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
   | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
   | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq 4 a1 a2 l T
-  | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure (a1 == a2).toLBool
   | _, _ => return .undef
 
@@ -665,7 +668,7 @@ open Lean.Meta in
 def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecMO U LBool := do
   let getVars rev := do
     let eq := if rev then mkAppN (.const `Eq [l]) #[T, s, t] else mkAppN (.const `Eq [l]) #[T, t, s]
-    let eqMvar ← Lean.Meta.mkFreshExprMVar eq
+    let eqMvar ← mkFreshExprMVar eq
     pure (eqMvar, [])
   if let some (_, _) ← extMatch (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') then 
     return .true

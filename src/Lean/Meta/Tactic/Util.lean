@@ -46,6 +46,9 @@ variable [Monad m] [MonadMCtx m]
 def _root_.Lean.MVarId.getType? (mvarId : MVarId) : m (Option Expr) :=
   return (← mvarId.findDecl?).map (·.type)
 
+def _root_.Lean.MVarId.getType! (mvarId : MVarId) : m Expr :=
+  return ((← mvarId.findDecl?).map (·.type)).get!
+
 /-- Get the type the given metavariable. -/
 def _root_.Lean.MVarId.getType (mvarId : MVarId) : MetaM Expr :=
   return (← mvarId.getDecl).type
