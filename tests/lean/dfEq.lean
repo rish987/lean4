@@ -47,12 +47,14 @@ theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
 def s := Nat.succ
 def z := Nat.zero
 
+def add := fun x y => Nat.add x y
+
 -- set_option trace.Kernel.ext true in
 -- example : Nat.add 0 n = n := rfl
 -- set_option trace.Kernel.ext true in
-example : Nat.add z n = n := @Eq.refl _ (Nat.add Nat.zero n)
--- def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
--- v.cons 1
+example : add (add z (s z)) n = s n := @Eq.refl _ (Nat.add Nat.zero n)
+def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
+v.cons 1
 
 -- set_option pp.all true in
 -- #print vecTest

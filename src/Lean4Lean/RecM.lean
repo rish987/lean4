@@ -86,12 +86,37 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → MO T Bool
   whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnfCoreNoExt (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
   whnf (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
   inferType (e : Expr) (inferOnly : Bool) : MO T Expr
 
 abbrev RecM := ReaderT Methods M
 abbrev RecMO (T : Type) := ContT T RecM
 abbrev RecMB := ContT Bool RecM
+
+def isDelta (env : Kernel.Environment) (e : Expr) : Option ConstantInfo := do
+  if let .const c _ := e.getAppFn then
+    if let some ci := env.find? c then
+      if ci.hasValue then
+        return ci
+  none
+
+def unfoldDefinitionCore (env : Kernel.Environment) (e : Expr) : Option Expr := do
+  if let .const _ ls := e then
+    if let some d := isDelta env e then
+      if ls.length == d.numLevelParams then
+        return d.instantiateValueLevelParams! ls
+  none
+
+def unfoldDefinition (env : Kernel.Environment) (e : Expr) : Option Expr := do
+  if e.isApp then
+    let f0 := e.getAppFn
+    if let some f := unfoldDefinitionCore env f0 then
+      let rargs := e.getAppRevArgs
+      return f.mkAppRevRange 0 rargs.size rargs
+    none
+  else
+    unfoldDefinitionCore env e
 
 -- TODO can this be derived from a more general rule?
 instance (priority := low) : MonadWithReaderOf LocalContext RecM where
@@ -113,6 +138,9 @@ def isDefEqCore (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := 
 def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
   -- TODO what exactly is going on here?
   fun f m => m.whnfCore e l cheapRec cheapProj fun e => f e m
+
+def whnfCoreNoExt (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+  fun f m => m.whnfCoreNoExt e l cheapRec cheapProj fun e => f e m
 
 
 def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf e d fun e => f e m

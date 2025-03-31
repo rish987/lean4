@@ -355,30 +355,6 @@ def whnfCore' (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false
   else
     pure e'
 
-def isDelta (env : Kernel.Environment) (e : Expr) : Option ConstantInfo := do
-  if let .const c _ := e.getAppFn then
-    if let some ci := env.find? c then
-      if ci.hasValue then
-        return ci
-  none
-
-def unfoldDefinitionCore (env : Kernel.Environment) (e : Expr) : Option Expr := do
-  if let .const _ ls := e then
-    if let some d := isDelta env e then
-      if ls.length == d.numLevelParams then
-        return d.instantiateValueLevelParams! ls
-  none
-
-def unfoldDefinition (env : Kernel.Environment) (e : Expr) : Option Expr := do
-  if e.isApp then
-    let f0 := e.getAppFn
-    if let some f := unfoldDefinitionCore env f0 then
-      let rargs := e.getAppRevArgs
-      return f.mkAppRevRange 0 rargs.size rargs
-    none
-  else
-    unfoldDefinitionCore env e
-
 def reduceNative (_env : Kernel.Environment) (e : Expr) : EIO KernelException (Option Expr) := do
   let .app f (.const c _) := e | return none
   if f == .const ``reduceBool [] then
@@ -799,11 +775,13 @@ def Methods.withFuel : Nat → Methods
   | 0 =>
     { isDefEqCore := fun _ _ _ _ _ => throw .deepRecursion
       whnfCore := fun _ _ _ _ _ => throw .deepRecursion
+      whnfCoreNoExt := fun _ _ _ _ _ => throw .deepRecursion
       whnf := fun _ _ _ => throw .deepRecursion
       inferType := fun _ _ => throw .deepRecursion }
   | n + 1 =>
     { isDefEqCore := fun _n t s l T f => isDefEqCore' _n t s l T (fun a => f a) (withFuel n)
       whnfCore := fun e l r p f => whnfCore' e l r p (fun e => f e) (withFuel n)
+      whnfCoreNoExt := fun e l r p f => whnfCoreNoExt' e l r p (fun e => f e) (withFuel n)
       whnf := fun e l f => whnf' e l (fun e => f e) (withFuel n)
       inferType := fun e i f => inferType' e i (fun a => f a) (withFuel n) }
 

@@ -15,7 +15,7 @@ def runMetaM (m : MetaM T) : RecMO U T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEq (t : Expr) (s : Expr) (deep := false) : RecMO T Bool :=
+def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool := do
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
@@ -56,39 +56,49 @@ def isExprDefEq (t : Expr) (s : Expr) (deep := false) : RecMO T Bool :=
     sorry
     sorry
     sorry
-  match t, s with
-  | .lam .., .lam ..
-  | .forallE .., .forallE ..
-  | .letE .., .letE .. => do processBinding (← getLCtx) #[] t s
-  | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-  | .mdata _ a1, _ => isExprDefEq a1 s
-  | _, .mdata _ a2 => isExprDefEq t a2
-  | .lit a1, .lit a2 => pure (a1 == a2)
-  | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s'
-  | .const n ls, .const n' ls' =>
-    let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
-    pure ret
-  | .fvar id, .fvar id' => pure $ id == id'
-  | .app f a, .app f' a' => do
-    let feq ← isExprDefEq f f'
-    let a ← instantiateMVars a
-    let a' ← instantiateMVars a'
-    -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
-    let aeq ← isExprDefEq a a'
-    pure $ feq && aeq
-  | .bvar .., _ => unreachable!
-  | _, .bvar .. => unreachable!
-  | .mvar .., .mvar .. => 
-    checkTypesAndAssign s t
-  | _, .mvar .. => 
-    checkTypesAndAssign s t
-  | .mvar .., _ =>
-    checkTypesAndAssign t s
-  | _, _ =>
-    pure false
-  termination_by sizeOf t
+  let tryMatch t := 
+    match pattern, t with
+    | .lam .., .lam ..
+    | .forallE .., .forallE ..
+    | .letE .., .letE .. => do processBinding (← getLCtx) #[] pattern target
+    | .sort a1, .sort a2 => pure (a1.isEquiv a2)
+    | .mdata _ a1, _ => isExprDefEq a1 target
+    | _, .mdata _ a2 => isExprDefEq pattern a2
+    | .lit a1, .lit a2 => pure (a1 == a2)
+    | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s'
+    | .const n ls, .const n' ls' =>
+      let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
+      pure ret
+    | .fvar id, .fvar id' => pure $ id == id'
+    | .app f a, .app f' a' => do
+      let feq ← isExprDefEq f f'
+      let a ← instantiateMVars a
+      let a' ← instantiateMVars a'
+      -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
+      let aeq ← isExprDefEq a a'
+      pure $ feq && aeq
+    | .bvar .., _ => unreachable!
+    | _, .bvar .. => unreachable!
+    | .mvar .., .mvar ..
+    | _, .mvar .. => 
+      checkTypesAndAssign target pattern
+    | .mvar .., _ =>
+      checkTypesAndAssign pattern target
+    | _, _ =>
+      pure false
+
+  if ← tryMatch target then
+    return true
+  let mut target' := target
+  while true do
+    if let some newTarget := unfoldDefinition (← getKEnv) target' then
+      target' ← whnfCore newTarget
+      if ← tryMatch target' then return true
+    else break
+
+  pure false
+  termination_by sizeOf target
   decreasing_by
-    sorry
     sorry
     sorry
     sorry

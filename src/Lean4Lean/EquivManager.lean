@@ -32,6 +32,8 @@ def toNode (e : Expr) : StateM EquivManager NodeRef := fun m => do
   let r := uf.size
   (r, { uf := uf.push, toNodeMap := toNodeMap.insert e r })
 
+example : HAdd.hAdd 1 2 = 3 := rfl
+
 variable (useHash : Bool) in
 def isEquiv (e1 e2 : Expr) : StateM EquivManager Bool := do
   -- FIXME: find a way to do this with withPtrEq or benchmark how important it is
