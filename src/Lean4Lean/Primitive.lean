@@ -1,4 +1,4 @@
-import Lean4Lean.TypeChecker
+import Lean4Lean.Methods
 
 namespace Lean
 namespace Kernel.Environment

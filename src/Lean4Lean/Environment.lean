@@ -1,4 +1,4 @@
-import Lean4Lean.TypeChecker
+import Lean4Lean.Methods
 import Lean4Lean.Quot
 import Lean4Lean.Inductive.Add
 import Lean4Lean.Primitive

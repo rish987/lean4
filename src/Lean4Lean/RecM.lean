@@ -17,6 +17,37 @@ namespace Lean
 
 abbrev InferCache := ExprMap Expr
 
+inductive CallData where
+|  isDefEqCore : Expr → Expr → Level → Expr → CallData
+|  whnfCore (e : Expr) (l : Option (Level × Expr)) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnfCoreNoExt (e : Expr) (l : Option (Level × Expr)) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnf (e : Expr) (l : Option (Level × Expr)) : CallData
+|  inferType (e : Expr) (inferOnly : Bool) : CallData
+deriving Inhabited
+
+instance : ToString CallData where
+toString
+| .isDefEqCore t s _ _   => s!"isDefEqCore ({t}) ({s})"
+| .whnfCore e _ k p      => s!"whnfCore ({e}) {k} {p}"
+| .whnfCoreNoExt e _ k p => s!"whnfCore ({e}) {k} {p}"
+| .whnf e _              => s!"whnf ({e})"
+| .inferType e d         => s!"inferType ({e}) ({d})"
+
+def CallData.name : CallData → String
+| .isDefEqCore ..     => "isDefEqCore"
+| .whnfCore ..        => "whnfCore"
+| .whnfCoreNoExt ..   => "whnfCore"
+| .whnf ..            => "whnf"
+| .inferType ..       => "inferType"
+
+@[reducible]
+def CallDataT : CallData → Type
+| .isDefEqCore ..     => Bool
+| .whnfCore ..        => Expr
+| .whnfCoreNoExt ..   => Expr
+| .whnf ..            => Expr
+| .inferType ..       => Expr
+
 structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
   inferTypeI : InferCache := {}
@@ -26,6 +57,7 @@ structure TypeChecker.State where
   eqvManager : EquivManager := {}
   failure : Std.HashSet (Expr × Expr) := {}
   mctx : MetavarContext := default
+  numCalls : Nat := 0
   -- traceState : TraceState := default
 
 structure TypeChecker.Context where
@@ -36,8 +68,16 @@ structure TypeChecker.Context where
   fuel : Nat := 5
   safety : DefinitionSafety := .safe
   lparams : List Name := []
+  callStack : Array (Nat × Nat × CallData) := #[]
+  callId : Nat := 0
 
 namespace TypeChecker
+
+@[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (id : Nat) (d : CallData) (x : m α) : m α :=
+  withReader (fun c => {c with callStack := c.callStack.push (i, id, d)}) x
+
+@[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (x : m α) : m α :=
+  withReader (fun c => {c with callId := id}) x
 
 -- instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
 --   inferInstance
@@ -85,10 +125,10 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → Level → Expr → MO T Bool
-  whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnfCoreNoExt (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnf (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
-  inferType (e : Expr) (inferOnly : Bool) : MO T Expr
+  whnfCore (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnfCoreNoExt (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnf (n : Nat) (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
+  inferType (n : Nat) (e : Expr) (inferOnly : Bool) : MO T Expr
 
 abbrev RecM := ReaderT Methods M
 abbrev RecMO (T : Type) := ContT T RecM
@@ -135,17 +175,18 @@ namespace Inner
 
 def isDefEqCore (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := fun f m => m.isDefEqCore n t s l T (fun a => f a m)
 
-def whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+def whnfCore (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
   -- TODO what exactly is going on here?
-  fun f m => m.whnfCore e l cheapRec cheapProj fun e => f e m
+  fun f m => m.whnfCore n e l cheapRec cheapProj fun e => f e m
 
-def whnfCoreNoExt (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
-  fun f m => m.whnfCoreNoExt e l cheapRec cheapProj fun e => f e m
+def whnfCoreNoExt (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+
+  fun f m => m.whnfCoreNoExt n e l cheapRec cheapProj fun e => f e m
 
 
-def whnf (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf e d fun e => f e m
+def whnf (n : Nat) (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf n e d fun e => f e m
 
-def inferType (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType e inferOnly fun a => f a m
+def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType n e inferOnly fun a => f a m
 
 @[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x

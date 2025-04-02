@@ -22,7 +22,7 @@ def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool 
       return false
     else
       -- must check whether types are definitionally equal or not, before assigning and returning true
-      let vType ← inferType v
+      let vType ← inferType 1000 v
       let mvarType ← mvar.mvarId!.getType!
       -- TODO ? if there are no metavars, do the normal isDefEq check
       if (← isExprDefEq mvarType vType) then
@@ -92,7 +92,8 @@ def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool 
   let mut target' := target
   while true do
     if let some newTarget := unfoldDefinition (← getKEnv) target' then
-      target' ← whnfCore newTarget
+      -- target' ← whnfCore newTarget
+      target' ← pure newTarget
       if ← tryMatch target' then return true
     else break
 
@@ -149,7 +150,7 @@ variable {m : Type → Type u} [Monad m] [MonadMCtx m]
 
 def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (Option (Array MVarId)) := do
   let some targetType ← mvarId.getType? (m := RecMO T) | unreachable!
-  let eType ← eType?.getDM (inferType e)
+  let eType ← eType?.getDM (inferType 1001 e)
 
   -- let rec getNumArgs e := do match e with
   -- | .forallE _ _ b _ => pure $ 1 + (← getNumArgs b)
@@ -208,14 +209,14 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
       let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType!}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
       ext_trace do pure s!"Trying to show {← condString}"
-      ext_trace do pure s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType lem)} to {← condString}"
+      ext_trace do pure s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType 1002 lem)} to {← condString}"
       let some gs ← apply T.mvarId! lem type? | 
-        ext_trace do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType lem)} to {← condString}"
+        ext_trace do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType 1003 lem)} to {← condString}"
         -- if dbg then
         --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
         return none
 
-      ext_trace do pure s!"Applying OK:{← ppExpr $ (← inferType lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      ext_trace do pure s!"Applying OK:{← ppExpr $ (← inferType 1004 lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       -- if dbg then
       --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       for g in gs do
@@ -231,6 +232,8 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
       let tsInst ← ts.mapM (fun t => instantiateMVars t)
       return some (TInst, tsInst)
 
+    let (T, _) ← getT
+
     for (lem, type?) in candidates do
       let (T, ts) ← getT
       -- for eqMvar in [tEqsMvar, sEqtMvar] do
@@ -238,7 +241,6 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
       -- rather than making new mvars every time?
       if let .some prf ← tryExtEq lem type? T ts then
         return some prf
-    let (T, _) ← getT
     ext_trace do pure s!"Showing FAIL: {← ppExpr $ ← T.mvarId!.getType!}"
     return none
     )
@@ -250,7 +252,7 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
       throw $ .other "unexpected mvar found in extensionally assigned variable"
     -- check that the proof returned by unification is well-typed with the kernel itself,
     -- to minimize the trust that we place on unification
-    _ ← inferType prf (inferOnly := false)
+    _ ← inferType 1005 prf (inferOnly := false)
     return some (prf, ts)
 
   return none

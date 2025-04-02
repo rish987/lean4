@@ -50,9 +50,9 @@ def z := Nat.zero
 def add := fun x y => Nat.add x y
 
 -- set_option trace.Kernel.ext true in
--- example : Nat.add 0 n = n := rfl
+example : Nat.add Nat.zero n = n := @Eq.refl _ (Nat.add Nat.zero n)
 -- set_option trace.Kernel.ext true in
-example : add (add z (s z)) n = s n := @Eq.refl _ (Nat.add Nat.zero n)
+-- example : add (add z (s z)) n = s n := @Eq.refl _ (Nat.add Nat.zero n)
 def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
 v.cons 1
 
