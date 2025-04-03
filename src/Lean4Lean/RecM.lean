@@ -18,19 +18,19 @@ namespace Lean
 abbrev InferCache := ExprMap Expr
 
 inductive CallData where
-|  isDefEqCore : Expr → Expr → Level → Expr → CallData
-|  whnfCore (e : Expr) (l : Option (Level × Expr)) (cheapRec : Bool) (cheapProj : Bool) : CallData
-|  whnfCoreNoExt (e : Expr) (l : Option (Level × Expr)) (cheapRec : Bool) (cheapProj : Bool) : CallData
-|  whnf (e : Expr) (l : Option (Level × Expr)) : CallData
+|  isDefEqCore : Expr → Expr → CallData
+|  whnfCore (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnfCoreNoExt (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnf (e : Expr) : CallData
 |  inferType (e : Expr) (inferOnly : Bool) : CallData
 deriving Inhabited
 
 instance : ToString CallData where
 toString
-| .isDefEqCore t s _ _   => s!"isDefEqCore ({t}) ({s})"
-| .whnfCore e _ k p      => s!"whnfCore ({e}) {k} {p}"
-| .whnfCoreNoExt e _ k p => s!"whnfCore ({e}) {k} {p}"
-| .whnf e _              => s!"whnf ({e})"
+| .isDefEqCore t s => s!"isDefEqCore ({t}) ({s})"
+| .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
+| .whnfCoreNoExt e k p => s!"whnfCore ({e}) {k} {p}"
+| .whnf e => s!"whnf ({e})"
 | .inferType e d         => s!"inferType ({e}) ({d})"
 
 def CallData.name : CallData → String
@@ -124,10 +124,10 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
 structure Methods where
-  isDefEqCore : Nat → Expr → Expr → Level → Expr → MO T Bool
-  whnfCore (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnfCoreNoExt (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnf (n : Nat) (e : Expr) (d : Option (Level × Expr)) : MO T Expr 
+  isDefEqCore : Nat → Expr → Expr → MO T Bool
+  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : MO T Expr
+  whnf (n : Nat) (e : Expr) : MO T Expr 
   inferType (n : Nat) (e : Expr) (inferOnly : Bool) : MO T Expr
 
 abbrev RecM := ReaderT Methods M
@@ -173,23 +173,38 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def isDefEqCore (n : Nat) (t s : Expr) (l : Level) (T : Expr) : RecMO U Bool := fun f m => m.isDefEqCore n t s l T (fun a => f a m)
+def isDefEqCore (n : Nat) (t s : Expr) : RecMO U Bool := fun f m => m.isDefEqCore n t s (fun a => f a m)
 
-def whnfCore (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
   -- TODO what exactly is going on here?
-  fun f m => m.whnfCore n e l cheapRec cheapProj fun e => f e m
+  fun f m => m.whnfCore n e cheapRec cheapProj fun e => f e m
 
-def whnfCoreNoExt (n : Nat) (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
 
-  fun f m => m.whnfCoreNoExt n e l cheapRec cheapProj fun e => f e m
+  fun f m => m.whnfCoreNoExt n e cheapRec cheapProj fun e => f e m
 
 
-def whnf (n : Nat) (e : Expr) (d : Option (Level × Expr) := none) : RecMO T Expr := fun f m => m.whnf n e d fun e => f e m
+def whnf (n : Nat) (e : Expr) : RecMO T Expr := fun f m => m.whnf n e fun e => f e m
 
 def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType n e inferOnly fun a => f a m
 
 @[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
+
+def ensureSortCore (e : Expr) (s : Expr) : RecMO T Expr := ContT.dud do
+  if e.isSort then return e
+  let e ← whnf 27 e
+  if e.isSort then return e
+  throw <| .typeExpected (← getKEnv) (← getLCtx) s
+
+def getTypeInfo (n : Nat) (t : Expr) : RecMO T (Level × Expr) := do
+  let tT ← inferType (43000 + n) t
+  let tTT ← inferType (44000 + n) tT
+  -- note that it is important that we do not immediately run `whnf tTT`,
+  -- as this would cause non-termination: we call this function in `whnf`
+  -- itself to get the information needed for β rules
+  let .sort l ← ensureSortCore tTT tT | unreachable!
+  pure (l, tT)
 
 -- instance : MonadTrace (RecMO T) :=
 --   inferInstance

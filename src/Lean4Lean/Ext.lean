@@ -15,15 +15,14 @@ def runMetaM (m : MetaM T) : RecMO U T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool := do
+def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) : RecMO T Bool := do
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
       return false
     else
       -- must check whether types are definitionally equal or not, before assigning and returning true
-      let vType ← inferType 1000 v
-      let mvarType ← mvar.mvarId!.getType!
+      let vType ← inferType 1000 v let mvarType ← mvar.mvarId!.getType!
       -- TODO ? if there are no metavars, do the normal isDefEq check
       if (← isExprDefEq mvarType vType) then
         mvar.mvarId!.assign v
@@ -62,8 +61,8 @@ def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool 
     | .forallE .., .forallE ..
     | .letE .., .letE .. => do processBinding (← getLCtx) #[] pattern target
     | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-    | .mdata _ a1, _ => isExprDefEq a1 target
-    | _, .mdata _ a2 => isExprDefEq pattern a2
+    | .mdata _ a1, _ => isExprDefEq a1 target targetD
+    | _, .mdata _ a2 => isExprDefEq pattern a2 targetD
     | .lit a1, .lit a2 => pure (a1 == a2)
     | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s'
     | .const n ls, .const n' ls' =>
@@ -90,10 +89,11 @@ def isExprDefEq (pattern : Expr) (target : Expr) (deep := false) : RecMO T Bool 
   if ← tryMatch target then
     return true
   let mut target' := target
+  -- let targetD ← targetD.getDM $ getTypeInfo target'
   while true do
     if let some newTarget := unfoldDefinition (← getKEnv) target' then
-      -- target' ← whnfCore newTarget
-      target' ← pure newTarget
+      target' ← whnfCore 1006 newTarget
+      -- target' ← pure newTarget
       if ← tryMatch target' then return true
     else break
 
@@ -223,7 +223,7 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
         let gT ← g.getType!
         let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"extensional hypothesis not of expected form: {gT}"
         ext_trace do pure s!"Trying reflection: {← ppExpr $ ← g.getType!}"
-        if not (← isDefEqCore 999 lhs rhs l T) then
+        if not (← isDefEqCore 999 lhs rhs) then
           ext_trace do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
           return none
         ext_trace do pure s!"Reflection OK: {← ppExpr $ ← g.getType!}"
