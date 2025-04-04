@@ -50,7 +50,7 @@ def z := Nat.zero
 def add := fun x y => Nat.add x y
 
 -- set_option trace.Kernel.ext true in
-example : Nat.add Nat.zero n = n := @Eq.refl _ (Nat.add Nat.zero n)
+example : Nat.add z n = n := @Eq.refl _ n
 -- set_option trace.Kernel.ext true in
 -- example : add (add z (s z)) n = s n := @Eq.refl _ (Nat.add Nat.zero n)
 def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
@@ -62,7 +62,8 @@ v.cons 1
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
 -- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
--- example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
+example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
+-- example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x

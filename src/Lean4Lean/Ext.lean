@@ -7,7 +7,7 @@ def toKernelException (m : EIO Exception α) : EIO KernelException (Sum α Excep
   | .ok s I => .ok (.inl s) I
   | .error e I => .ok (.inr e) I
 
-def runMetaM (m : MetaM T) : RecMO U T := do
+def runMetaM (m : MetaM T) : RecM T := do
   let mut options := (← readThe Context).options
   let m' := Lean.Meta.MetaM.run m {lctx := ← getLCtx} {mctx := ← getMCtx}|>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'}
   match ← toKernelException m' with
@@ -15,8 +15,8 @@ def runMetaM (m : MetaM T) : RecMO U T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) : RecMO T Bool := do
-  let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecMO T Bool := do
+def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) : RecM Bool := do
+  let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecM Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
       return false
@@ -32,8 +32,8 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
   termination_by sizeOf v
   decreasing_by
     sorry
-  let rec processBinding (lctx : LocalContext) (fvars : Array Expr) (t s : Expr) : RecMO T Bool :=
-    let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : RecMO T Bool := do
+  let rec processBinding (lctx : LocalContext) (fvars : Array Expr) (t s : Expr) : RecM Bool :=
+    let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : RecM Bool := do
       let d₁     := d₁.instantiateRev fvars
       let d₂     := d₂.instantiateRev fvars
       if not (← isExprDefEq d₁ d₂) then
@@ -90,9 +90,21 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     return true
   let mut target' := target
   -- let targetD ← targetD.getDM $ getTypeInfo target'
+
   while true do
+    -- target' ← pure target'
+    --
+    -- let newTarget? ← do
+    --   dbg_trace s!"DBG[15]: Ext.lean:101: target'={target'}"
+    --   if let some newTarget ← reduceExt 1 target' (deep := false) then
+    --     pure $ .some newTarget
+    --   else if let some newTarget := unfoldDefinition (← getKEnv) target' then
+    --     pure $ .some newTarget
+    --   else pure .none
+    --
+    -- if let some newTarget := newTarget? then
     if let some newTarget := unfoldDefinition (← getKEnv) target' then
-      target' ← whnfCore 1006 newTarget
+      target' ← whnfCoreNoExt 1006 newTarget
       -- target' ← pure newTarget
       if ← tryMatch target' then return true
     else break
@@ -111,13 +123,13 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     sorry
     sorry
 
-def mkFreshExprMVar (type : Expr) (kind : MetavarKind := default) (userName : Name := default) : RecMO T Expr := do
+def mkFreshExprMVar (type : Expr) (kind : MetavarKind := default) (userName : Name := default) : RecM Expr := do
   Lean.Meta.mkFreshExprMVarAt (← getLCtx) #[] type kind userName
 
-def forallMetaTelescope (e : Expr) : RecMO T (Array Expr × Expr) :=
+def forallMetaTelescope (e : Expr) : RecM (Array Expr × Expr) :=
   process #[] e
 where
-  process (mvars : Array Expr) (type : Expr) : RecMO T (Array Expr × Expr) := do
+  process (mvars : Array Expr) (type : Expr) : RecM (Array Expr × Expr) := do
     match type with
     | .forallE n d b _ =>
       let d  := d.instantiateRev mvars
@@ -130,8 +142,8 @@ where
 
 def forallTelescope
     (type              : Expr)
-    (k                 : Array Expr → Expr → RecMO T α) : RecMO T α := do
-  let rec process (lctx : LocalContext) (fvars : Array Expr) (j : Nat) (type : Expr) : RecMO T α := do
+    (k                 : Array Expr → Expr → RecM α) : RecM α := do
+  let rec process (lctx : LocalContext) (fvars : Array Expr) (j : Nat) (type : Expr) : RecM α := do
     match type with
     | .forallE n d b bi =>
       let d     := d.instantiateRevRange j fvars.size fvars
@@ -148,8 +160,8 @@ def forallTelescope
 
 variable {m : Type → Type u} [Monad m] [MonadMCtx m] 
 
-def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T (Option (Array MVarId)) := do
-  let some targetType ← mvarId.getType? (m := RecMO T) | unreachable!
+def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecM (Option (Array MVarId)) := do
+  let some targetType ← mvarId.getType? (m := RecM) | unreachable!
   let eType ← eType?.getDM (inferType 1001 e)
 
   -- let rec getNumArgs e := do match e with
@@ -173,13 +185,16 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecMO T 
   let newMVarIds := newMVars.map fun m => m.mvarId!
   return newMVarIds
 
-def ppExpr (e : Expr) : RecMO T Format := runMetaM (Lean.Meta.ppExpr e)
+def ppExpr (e : Expr) : RecM Format := runMetaM (Lean.Meta.ppExpr e)
 
-def ext_trace (getS : RecMO T String) : RecMO T Unit := do
+def ext_trace (dbg : Bool) (getS : RecM String) : RecM Unit := do
+  let mut print := dbg
   if let .some (.ofBool true) := (← getOptions).find `trace.Kernel.ext then
+    print := true
+  if print then
     dbg_trace (← getS)
 
-def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) := do
+def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) := do
   if (← readThe Context).fuel == 0 then
     return none
   -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
@@ -205,43 +220,51 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
       )
     let mut candidates := (← lemInfos.mapM (Lean.Meta.mkConstWithFreshMVarLevels' ·)).zip (List.replicate lems.length none)
     candidates := candidates ++ localLems
-    let tryExtEq {U} lem type? (T : Expr) (ts : List Expr) : RecMO U (Option (Expr × List Expr)) := do
+    let tryExtEq lem type? (T : Expr) (ts : List Expr) : RecM (Option (Expr × List Expr)) := do
       let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType!}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
-      ext_trace do pure s!"Trying to show {← condString}"
-      ext_trace do pure s!"Trying to apply (fuel {(← read).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType 1002 lem)} to {← condString}"
+      ext_trace dbg do pure s!"Trying to show {← condString}"
+      ext_trace dbg do pure s!"Trying to apply (fuel {(← readThe Context).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType 1002 lem)} to {← condString}"
       let some gs ← apply T.mvarId! lem type? | 
-        ext_trace do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType 1003 lem)} to {← condString}"
+        ext_trace dbg do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType 1003 lem)} to {← condString}"
         -- if dbg then
         --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
         return none
 
-      ext_trace do pure s!"Applying OK:{← ppExpr $ (← inferType 1004 lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      ext_trace dbg do pure s!"Applying OK:{← ppExpr $ (← inferType 1004 lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       -- if dbg then
       --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       for g in gs do
         let gT ← g.getType!
         let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"extensional hypothesis not of expected form: {gT}"
-        ext_trace do pure s!"Trying reflection: {← ppExpr $ ← g.getType!}"
+        ext_trace dbg do pure s!"Trying reflection: {← ppExpr $ ← g.getType!}"
         if not (← isDefEqCore 999 lhs rhs) then
-          ext_trace do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
+          ext_trace dbg do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
           return none
-        ext_trace do pure s!"Reflection OK: {← ppExpr $ ← g.getType!}"
-      ext_trace do pure s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType!}"
+        ext_trace dbg do pure s!"Reflection OK: {← ppExpr $ ← g.getType!}"
+      ext_trace dbg do pure s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType!}"
       let TInst ← instantiateMVars T
       let tsInst ← ts.mapM (fun t => instantiateMVars t)
       return some (TInst, tsInst)
 
-    let (T, _) ← getT
+    let getMVars := do
+      let ts ← getTs.foldlM (init := []) fun acc f => do
+        let mT := f acc
+        let m ← mkFreshExprMVar mT
+        pure $ acc ++ [m]
+      let T::ts := ts.reverse | unreachable!
+      pure (T, ts)
+
+    let (T, _) ← getMVars
 
     for (lem, type?) in candidates do
-      let (T, ts) ← getT
+      let (T, ts) ← getMVars
       -- for eqMvar in [tEqsMvar, sEqtMvar] do
       -- TODO is there a way to "undo" assignments from previous failed unification attempts,
       -- rather than making new mvars every time?
       if let .some prf ← tryExtEq lem type? T ts then
         return some prf
-    ext_trace do pure s!"Showing FAIL: {← ppExpr $ ← T.mvarId!.getType!}"
+    ext_trace dbg do pure s!"Showing FAIL: {← ppExpr $ ← T.mvarId!.getType!}"
     return none
     )
 
@@ -256,6 +279,3 @@ def extMatch' (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : 
     return some (prf, ts)
 
   return none
-
-def extMatch (getT : RecMO U (Expr × List Expr)) (localMarker : Name) (lems : List Name) (dbg := false) : RecMO U (Option (Expr × List Expr)) :=
-  extMatch' getT localMarker lems dbg

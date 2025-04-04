@@ -23,15 +23,17 @@ inductive CallData where
 |  whnfCoreNoExt (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
 |  whnf (e : Expr) : CallData
 |  inferType (e : Expr) (inferOnly : Bool) : CallData
+|  extMatch (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : CallData
 deriving Inhabited
 
 instance : ToString CallData where
 toString
-| .isDefEqCore t s => s!"isDefEqCore ({t}) ({s})"
+| .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
 | .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
 | .whnfCoreNoExt e k p => s!"whnfCore ({e}) {k} {p}"
-| .whnf e => s!"whnf ({e})"
-| .inferType e d         => s!"inferType ({e}) ({d})"
+| .whnf e              => s!"whnf ({e})"
+| .inferType e d       => s!"inferType ({e}) ({d})"
+| .extMatch ..         => s!"extMatch"
 
 def CallData.name : CallData → String
 | .isDefEqCore ..     => "isDefEqCore"
@@ -39,6 +41,7 @@ def CallData.name : CallData → String
 | .whnfCoreNoExt ..   => "whnfCore"
 | .whnf ..            => "whnf"
 | .inferType ..       => "inferType"
+| .extMatch ..        => "extMatch"
 
 @[reducible]
 def CallDataT : CallData → Type
@@ -47,6 +50,7 @@ def CallDataT : CallData → Type
 | .whnfCoreNoExt ..   => Expr
 | .whnf ..            => Expr
 | .inferType ..       => Expr
+| .extMatch ..        => Option (Expr × List Expr) 
 
 structure TypeChecker.State where
   ngen : NameGenerator := { namePrefix := `_kernel_fresh, idx := 0 }
@@ -90,8 +94,6 @@ abbrev M := ReaderT Context <| StateT State <| EIO KernelException
 -- instance : MonadControlT MetaM (M) :=
 --   inferInstance
 
-abbrev MO (T : Type) := ContT T M
-
 def M.run (env : Kernel.Environment) (env' : Environment) (safety : DefinitionSafety := .safe) (lctx : LocalContext := {}) (options : Options)
     (x : M α) (fuel := 5) (localDfEqs : List Expr := []) : EIO KernelException α :=
   x { env, env', safety, lctx, fuel, options } |>.run' {}
@@ -124,15 +126,14 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
   withReader f := withReader fun s => { s with lctx := f s.lctx }
 
 structure Methods where
-  isDefEqCore : Nat → Expr → Expr → MO T Bool
-  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : MO T Expr
-  whnf (n : Nat) (e : Expr) : MO T Expr 
-  inferType (n : Nat) (e : Expr) (inferOnly : Bool) : MO T Expr
+  isDefEqCore : Nat → Expr → Expr → M Bool
+  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
+  whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
+  whnf (n : Nat) (e : Expr) : M Expr 
+  inferType (n : Nat) (e : Expr) (inferOnly : Bool) : M Expr
+  extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : M (Option (Expr × List Expr))
 
 abbrev RecM := ReaderT Methods M
-abbrev RecMO (T : Type) := ContT T RecM
-abbrev RecMB := ContT Bool RecM
 
 def isDelta (env : Kernel.Environment) (e : Expr) : Option ConstantInfo := do
   if let .const c _ := e.getAppFn then
@@ -163,8 +164,8 @@ instance (priority := low) : MonadWithReaderOf LocalContext RecM where
   withReader f m := fun b c => m b ({c with lctx := f c.lctx})
 
 -- TODO can this be derived from a more general rule?
-instance (priority := low) : MonadWithReaderOf LocalContext (RecMO T) where
-  withReader f m := fun b meths c => m b meths ({c with lctx := f c.lctx})
+instance (priority := low) : MonadWithReaderOf LocalContext RecM where
+  withReader f m := fun meths c => m meths ({c with lctx := f c.lctx})
 
 inductive ReductionStatus where
   | continue (tn sn : Expr)
@@ -173,31 +174,32 @@ inductive ReductionStatus where
 
 namespace Inner
 
-def isDefEqCore (n : Nat) (t s : Expr) : RecMO U Bool := fun f m => m.isDefEqCore n t s (fun a => f a m)
+def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
-def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   -- TODO what exactly is going on here?
-  fun f m => m.whnfCore n e cheapRec cheapProj fun e => f e m
+  fun m => m.whnfCore n e cheapRec cheapProj
 
-def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecMO T Expr :=
+def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
+  fun m => m.whnfCoreNoExt n e cheapRec cheapProj
 
-  fun f m => m.whnfCoreNoExt n e cheapRec cheapProj fun e => f e m
+def extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) :=
+  fun m => m.extMatch n getT localMarker lems dbg
 
+def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
 
-def whnf (n : Nat) (e : Expr) : RecMO T Expr := fun f m => m.whnf n e fun e => f e m
-
-def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecMO T Expr := fun f m => m.inferType n e inferOnly fun a => f a m
+def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecM Expr := fun m => m.inferType n e inferOnly
 
 @[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
   withReader (fun _ => lctx) x
 
-def ensureSortCore (e : Expr) (s : Expr) : RecMO T Expr := ContT.dud do
+def ensureSortCore (e : Expr) (s : Expr) : RecM Expr := do
   if e.isSort then return e
   let e ← whnf 27 e
   if e.isSort then return e
   throw <| .typeExpected (← getKEnv) (← getLCtx) s
 
-def getTypeInfo (n : Nat) (t : Expr) : RecMO T (Level × Expr) := do
+def getTypeInfo (n : Nat) (t : Expr) : RecM (Level × Expr) := do
   let tT ← inferType (43000 + n) t
   let tTT ← inferType (44000 + n) tT
   -- note that it is important that we do not immediately run `whnf tTT`,
@@ -205,6 +207,18 @@ def getTypeInfo (n : Nat) (t : Expr) : RecMO T (Level × Expr) := do
   -- itself to get the information needed for β rules
   let .sort l ← ensureSortCore tTT tT | unreachable!
   pure (l, tT)
+
+def reduceExt (n : Nat) (e : Expr) (dbg : Bool := false) : RecM (Option Expr) := do
+  let (l, T) ← getTypeInfo 2 e
+  let mut dbg := dbg
+  -- if let (.app (.app (.const `Nat.add []) (.lit (.natVal 0))) n) := e then
+  -- if let (.app (.app (.const `Nat.add []) x) n) := e then
+  --   if let .const `Nat.zero _  := x.getAppFn then
+  --     dbg := true
+  let getVars := [fun _ => T, fun ms => mkAppN (.const `Eq [l]) #[T, e, ms[0]!]]
+  if let some (_, ts) ← extMatch (100 + n) getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg then 
+    return .some ts[0]!
+  return none
 
 -- instance : MonadTrace (RecMO T) :=
 --   inferInstance
