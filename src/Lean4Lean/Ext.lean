@@ -15,7 +15,7 @@ def runMetaM (m : MetaM T) : RecM T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) : RecM Bool := do
+def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) (dbg := false) : RecM Bool := do
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecM Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
@@ -59,22 +59,24 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     match pattern, t with
     | .lam .., .lam ..
     | .forallE .., .forallE ..
-    | .letE .., .letE .. => do processBinding (← getLCtx) #[] pattern target
+    | .letE .., .letE .. => do
+      let ret ← processBinding (← getLCtx) #[] pattern target
+      pure ret
     | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-    | .mdata _ a1, _ => isExprDefEq a1 target targetD
-    | _, .mdata _ a2 => isExprDefEq pattern a2 targetD
+    | .mdata _ a1, _ => isExprDefEq a1 target targetD (dbg := dbg)
+    | _, .mdata _ a2 => isExprDefEq pattern a2 targetD (dbg := dbg)
     | .lit a1, .lit a2 => pure (a1 == a2)
-    | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s'
+    | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s' (dbg := dbg)
     | .const n ls, .const n' ls' =>
       let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
       pure ret
     | .fvar id, .fvar id' => pure $ id == id'
     | .app f a, .app f' a' => do
-      let feq ← isExprDefEq f f'
+      let feq ← isExprDefEq f f' (dbg := dbg)
       let a ← instantiateMVars a
       let a' ← instantiateMVars a'
       -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
-      let aeq ← isExprDefEq a a'
+      let aeq ← isExprDefEq a a' (dbg := dbg)
       pure $ feq && aeq
     | .bvar .., _ => unreachable!
     | _, .bvar .. => unreachable!
@@ -160,7 +162,7 @@ def forallTelescope
 
 variable {m : Type → Type u} [Monad m] [MonadMCtx m] 
 
-def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecM (Option (Array MVarId)) := do
+def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) (dbg := false) : RecM (Option (Array MVarId)) := do
   let some targetType ← mvarId.getType? (m := RecM) | unreachable!
   let eType ← eType?.getDM (inferType 1001 e)
 
@@ -173,7 +175,7 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) : RecM (Op
 
   let newMVars : Array Expr ← do
     let (newMVars, eType) ← forallMetaTelescope eType
-    if not (← isExprDefEq eType targetType) then
+    if not (← isExprDefEq eType targetType (dbg := dbg)) then
       return none
     else
       pure newMVars
@@ -225,7 +227,7 @@ def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems :
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
       ext_trace dbg do pure s!"Trying to show {← condString}"
       ext_trace dbg do pure s!"Trying to apply (fuel {(← readThe Context).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType 1002 lem)} to {← condString}"
-      let some gs ← apply T.mvarId! lem type? | 
+      let some gs ← apply T.mvarId! lem type? dbg |
         ext_trace dbg do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType 1003 lem)} to {← condString}"
         -- if dbg then
         --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"

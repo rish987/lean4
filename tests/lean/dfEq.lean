@@ -29,32 +29,32 @@
 --   rfl
 -- #print K.k
 --
-inductive Vec : Nat → Type where
-| nil : Vec 0
-| cons {n : Nat} (v : Vec n) (x : Nat) : Vec (Nat.succ n)
-
--- @[drw]
--- theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
+-- inductive Vec : Nat → Type where
+-- | nil : Vec 0
+-- | cons {n : Nat} (v : Vec n) (x : Nat) : Vec (Nat.succ n)
+--
+-- -- @[drw]
+-- -- theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
 @[drw]
 theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
 
 @[drw]
 theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
-
--- @[rw] -- bad rule leading to non-termination
--- theorem succComm : Nat.succ n = 1 + n := sorry
-
+--
+-- -- @[rw] -- bad rule leading to non-termination
+-- -- theorem succComm : Nat.succ n = 1 + n := sorry
+--
 def s := Nat.succ
 def z := Nat.zero
 
 def add := fun x y => Nat.add x y
 
 -- set_option trace.Kernel.ext true in
-example : Nat.add z n = n := @Eq.refl _ n
+example : add z n = n := @Eq.refl _ n
 -- set_option trace.Kernel.ext true in
--- example : add (add z (s z)) n = s n := @Eq.refl _ (Nat.add Nat.zero n)
-def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
-v.cons 1
+-- example : add (add z (s z)) n = s n := rfl
+-- def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
+-- v.cons 1
 
 -- set_option pp.all true in
 -- #print vecTest
@@ -63,14 +63,14 @@ v.cons 1
 -- example : Nat := 1
 -- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
 example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
--- example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
+example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x
 -- 1 + y --> succ (zero + y)
 
--- @[deq]
--- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
+@[deq]
+theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
 -- theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
 

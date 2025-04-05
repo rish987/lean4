@@ -1,5 +1,8 @@
 import Lean.Environment
 
+@[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
+  withReader (fun _ => lctx) x
+
 namespace Lean.Expr
 
 def prop : Expr := .sort .zero
@@ -36,6 +39,49 @@ unsafe def replaceUnsafeT [Monad m] (f? : Expr → m (Option Expr)) (e : Expr) :
 unsafe def replaceUnsafe' [Monad m] (f? : Expr → m (Option Expr)) (e : Expr) : m Expr :=
   (replaceUnsafeT f? e).run' mkPtrMap
 
+@[specialize]
+unsafe def replaceUnsafeTFVars [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadNameGenerator m] (f? : Expr → m (Option Expr)) (e : Expr) : ReplaceT m Expr := do
+  let rec @[specialize] visit (e : Expr) := do
+    if let some result := (← get).find? e then
+      return result
+    match ← f? e with
+    | some eNew => cacheT e eNew
+    | none      => match e with
+      | Expr.forallE n d b bi   =>
+        let id := ⟨← mkFreshId⟩
+        let d' ← visit d
+        withLCtx ((← getLCtx).mkLocalDecl id n d' bi) do
+          let var := .fvar id
+          let b' := b.instantiate1 var
+          cacheT e <| (← getLCtx).mkForall #[var] (← visit b')
+      | .lam n d b bi =>
+        let id := ⟨← mkFreshId⟩
+        let d' ← visit d
+        withLCtx ((← getLCtx).mkLocalDecl id n d' bi) do
+          let var := .fvar id
+          let b' := b.instantiate1 var
+          cacheT e <| (← getLCtx).mkLambda #[var] (← visit b')
+      | .mdata _ b =>
+        cacheT e <| e.updateMData! (← visit b)
+      | .letE n d v b o =>
+        let id := ⟨← mkFreshId⟩
+        let v' ← visit v
+        let d' ← visit d
+        withLCtx ((← getLCtx).mkLetDecl id n d' v' o) do
+          let var := .fvar id
+          let b' := b.instantiate1 var
+          cacheT e <| (← getLCtx).mkForall #[var] (← visit b')
+      | .app f a =>
+        cacheT e <| e.updateApp! (← visit f) (← visit a)
+      | .proj _ _ b =>
+        cacheT e <|  e.updateProj! (← visit b)
+      | e => return e
+  visit e
+
+@[inline]
+unsafe def replaceUnsafeFVars' [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadNameGenerator m] (f? : Expr → m (Option Expr)) (e : Expr) : m Expr :=
+  (replaceUnsafeTFVars f? e).run' mkPtrMap
+
 end ReplaceImpl
 
 /- TODO: use withPtrAddr, withPtrEq to avoid unsafe tricks above.
@@ -63,6 +109,57 @@ def replaceNoCacheT [Monad m] (f? : Expr → m (Option Expr)) (e : Expr) : m Exp
 @[implemented_by ReplaceImpl.replaceUnsafe']
 partial def replaceM [Monad m] (f? : Expr → m (Option Expr)) (e : Expr) : m Expr :=
   e.replaceNoCacheT f?
+
+def _root_.nat_add_match (e : Expr) : Bool := 
+  match_expr e with
+  | Eq _ t _ =>
+    match_expr t with
+    | Nat.add x n =>
+      match_expr x with
+      | Nat.zero =>
+        true
+      | _ => false
+    | _ => false
+  | _ => false
+
+@[specialize]
+partial def replaceNoCacheTFVars [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadNameGenerator m] (f? : Expr → m (Option Expr)) (e : Expr) : m Expr := do
+  match ← f? e with
+  | some eNew => pure eNew
+  | none => match e with
+    | .forallE n d b bi =>
+      let id := ⟨← mkFreshId⟩
+      let d' ← replaceNoCacheTFVars f? d
+      withLCtx ((← getLCtx).mkLocalDecl id n d' bi) do
+        let var := .fvar id
+        let b' := b.instantiate1 var
+        return (← getLCtx).mkForall #[var] (← replaceNoCacheTFVars f? b')
+    | .lam n d b bi =>
+      let id := ⟨← mkFreshId⟩
+      let d' ← replaceNoCacheTFVars f? d
+      withLCtx ((← getLCtx).mkLocalDecl id n d' bi) do
+        let var := .fvar id
+        let b' := b.instantiate1 var
+        return (← getLCtx).mkLambda #[var] (← replaceNoCacheTFVars f? b')
+    | .mdata _ b =>
+      return e.updateMData! (← replaceNoCacheTFVars f? b)
+    | .letE n d v b o =>
+      let id := ⟨← mkFreshId⟩
+      let v' ← replaceNoCacheTFVars f? v
+      let d' ← replaceNoCacheTFVars f? d
+      withLCtx ((← getLCtx).mkLetDecl id n d' v' o) do
+        let var := .fvar id
+        let b' := b.instantiate1 var
+        return (← getLCtx).mkForall #[var] (← replaceNoCacheTFVars f? b')
+    | .app f a =>
+      return e.updateApp! (← replaceNoCacheTFVars f? f) (← replaceNoCacheTFVars f? a)
+    | .proj _ _ b =>
+      return e.updateProj! (← replaceNoCacheTFVars f? b)
+    | e => return e
+
+@[implemented_by ReplaceImpl.replaceUnsafeFVars']
+def replaceMFVars [Monad m] [MonadWithReaderOf LocalContext m] [MonadLCtx m] [MonadNameGenerator m] (f? : Expr → m (Option Expr)) (e : Expr) : m Expr :=
+  e.replaceNoCacheTFVars f?
 
 def natZero : Expr := .const ``Nat.zero []
 def natSucc : Expr := .const ``Nat.succ []

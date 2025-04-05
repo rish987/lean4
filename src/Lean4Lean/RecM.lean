@@ -21,7 +21,7 @@ inductive CallData where
 |  isDefEqCore : Expr → Expr → CallData
 |  whnfCore (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
 |  whnfCoreNoExt (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
-|  whnf (e : Expr) : CallData
+|  whnf (e : Expr) (ext : Bool) : CallData
 |  inferType (e : Expr) (inferOnly : Bool) : CallData
 |  extMatch (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : CallData
 deriving Inhabited
@@ -31,7 +31,7 @@ toString
 | .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
 | .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
 | .whnfCoreNoExt e k p => s!"whnfCore ({e}) {k} {p}"
-| .whnf e              => s!"whnf ({e})"
+| .whnf e ext          => s!"whnf ({e}, {ext})"
 | .inferType e d       => s!"inferType ({e}) ({d})"
 | .extMatch ..         => s!"extMatch"
 
@@ -129,7 +129,7 @@ structure Methods where
   isDefEqCore : Nat → Expr → Expr → M Bool
   whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
   whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
-  whnf (n : Nat) (e : Expr) : M Expr 
+  whnf (n : Nat) (e : Expr) (ext : Bool := true) : M Expr 
   inferType (n : Nat) (e : Expr) (inferOnly : Bool) : M Expr
   extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : M (Option (Expr × List Expr))
 
@@ -186,12 +186,9 @@ def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) 
 def extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) :=
   fun m => m.extMatch n getT localMarker lems dbg
 
-def whnf (n : Nat) (e : Expr) : RecM Expr := fun m => m.whnf n e
+def whnf (n : Nat) (e : Expr) (ext : Bool := true) : RecM Expr := fun m => m.whnf n e ext
 
 def inferType (n : Nat) (e : Expr) (inferOnly := true) : RecM Expr := fun m => m.inferType n e inferOnly
-
-@[inline] def withLCtx {α : Type u} [MonadWithReaderOf LocalContext m] (lctx : LocalContext) (x : m α) : m α :=
-  withReader (fun _ => lctx) x
 
 def ensureSortCore (e : Expr) (s : Expr) : RecM Expr := do
   if e.isSort then return e

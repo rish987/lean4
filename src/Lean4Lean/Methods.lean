@@ -27,14 +27,19 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
       let m : RecM (CallDataT d):=
         match d with
         | .isDefEqCore t s => isDefEqCoreCheckTypes t s
-        | .whnfCore e r p
-        | .whnfCoreNoExt e r p => do
+        | .whnfCore e r p => do
           let ret ← whnfCore' e r p
           -- dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← getTrace true}"
           -- _ ← Inner.inferType 51 ret (inferOnly := false) 
           -- dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
           pure ret
-        | .whnf e => whnf' e
+        | .whnfCoreNoExt e r p => do
+          let ret ← whnfCoreNoExt' e r p
+          -- dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← getTrace true}"
+          -- _ ← Inner.inferType 51 ret (inferOnly := false) 
+          -- dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
+          pure ret
+        | .whnf e ext => whnf' e ext
         | .inferType e o => do
           let l := (← readThe Context).callStack.map fun d => s!"{d.1}"
           let ret ← inferType' e o
@@ -77,10 +82,10 @@ def Methods.withFuel (n : Nat) : Methods :=
       let ret ← (fuelWrap i n $ .whnfCore e k p)
       pure ret
     whnfCoreNoExt := fun i e k p => do
-      let ret ← (fuelWrap i n $ .whnfCore e k p)
+      let ret ← (fuelWrap i n $ .whnfCoreNoExt e k p)
       pure ret
-    whnf := fun i e => do
-      let ret ← (fuelWrap i n $ .whnf e)
+    whnf := fun i e ext => do
+      let ret ← (fuelWrap i n $ .whnf e ext)
       pure $ ret
     inferType := fun i e o => do
       let ret ← (fuelWrap i n $ .inferType e o)

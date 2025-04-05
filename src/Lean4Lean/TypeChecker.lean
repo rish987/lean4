@@ -239,18 +239,18 @@ def reduceRecursor (e : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) :
   if env.quotInit then
     if let some r ← quotReduceRec e (whnf 47) then
       return r
-  let whnf' e := if cheapRec then whnfCore 48 e cheapRec cheapProj else whnf 49 e
+  let whnf' e := if cheapRec then whnfCoreNoExt 48 e cheapRec cheapProj else whnf 49 e (ext := false)
   if let some r ← inductiveReduceRec env e whnf' (inferType 50) (isDefEqCheckTypes 16) then
     return r
   return none
 
 def whnfFVar (e : Expr) (cheapRec cheapProj : Bool) : RecM Expr := do
   if let some (.ldecl (value := v) ..) := (← getLCtx).find? e.fvarId! then
-    return ← whnfCore 51 v cheapRec cheapProj
+    return ← whnfCoreNoExt 51 v cheapRec cheapProj
   return e
 
 def reduceProj (idx : Nat) (struct : Expr) (cheapRec cheapProj : Bool) : RecM (Option Expr) := do
-  let mut c ← (if cheapProj then whnfCore 52 struct cheapRec cheapProj else whnf 53 struct)
+  let mut c ← (if cheapProj then whnfCoreNoExt 52 struct cheapRec cheapProj else whnf 53 struct (ext := false))
   if let .lit (.strVal s) := c then
     c := .strLitToConstructor s
   c.withApp fun mk args => do
@@ -280,13 +280,13 @@ def whnfCoreNoExt' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Ex
   | .fvar _ => return ← whnfFVar e cheapRec cheapProj
   | .app .. =>
     e.withAppRev fun f0 rargs => do
-    let f ← whnfCore 54 f0 cheapRec cheapProj
+    let f ← whnfCoreNoExt 54 f0 cheapRec cheapProj
     if let .lam _ _ body _ := f then
       let rec loop m (f : Expr) : RecM Expr :=
         let cont2 := do
           let r := f.instantiateRange (rargs.size - m) rargs.size rargs
           let r := r.mkAppRevRange 0 (rargs.size - m) rargs
-          save <|← whnfCore 55 r cheapRec cheapProj
+          save <|← whnfCoreNoExt 55 r cheapRec cheapProj
         if let .lam _ _ body _ := f then
           if m < rargs.size then loop (m + 1) body
           else cont2
@@ -294,17 +294,17 @@ def whnfCoreNoExt' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Ex
       loop 1 body
     else if f == f0 then
       if let some r ← reduceRecursor e cheapRec cheapProj then
-        whnfCore 56 r cheapRec cheapProj
+        whnfCoreNoExt 56 r cheapRec cheapProj
       else
         pure e
     else
       let r := f.mkAppRevRange 0 rargs.size rargs
-      save <|← whnfCore 57 r cheapRec cheapProj
+      save <|← whnfCoreNoExt 57 r cheapRec cheapProj
   | .letE _ _ val body _ =>
-    save <|← whnfCore 58 (body.instantiate1 val) cheapRec cheapProj
+    save <|← whnfCoreNoExt 58 (body.instantiate1 val) cheapRec cheapProj
   | .proj _ idx s =>
     if let some m ← reduceProj idx s cheapRec cheapProj then
-      save <|← whnfCore 59 m cheapRec cheapProj
+      save <|← whnfCoreNoExt 59 m cheapRec cheapProj
     else
       save e
 
@@ -329,8 +329,12 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
     let mut newe := e
     if ext then
       ext_trace dbg do pure s!"DBG[1]: TypeChecker.lean:345: e'={← ppExpr e}"
-      if let .some newe' ← reduceExt 0 newe (dbg := dbg) then
-        newe := newe'
+      -- dbg_trace s!"DBG[1]: TypeChecker.lean:333: {newe}"
+      newe ← newe.replaceMFVars fun sube => do
+        let ret ← reduceExt 0 sube (dbg := dbg)
+        pure ret
+        -- pure none
+      -- dbg_trace s!"DBG[2]: TypeChecker.lean:333: {newe}"
     newe ← whnfCoreNoExt' newe cheapRec cheapProj
     if newe == e then
       break
@@ -380,8 +384,9 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.ble then return ← reduceBinNatPred Nat.ble a b
   return none
 
-def whnf' (_e : Expr) : RecM Expr := do
-  let e ← whnfCore 66 _e
+def whnf' (_e : Expr) (ext : Bool) : RecM Expr := do
+  let whnfCoreFn := if ext then whnfCore else whnfCoreNoExt
+  let e ← whnfCoreFn 66 _e
   -- Do not cache easy cases
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .lit .. => return e
@@ -401,7 +406,7 @@ def whnf' (_e : Expr) : RecM Expr := do
   | 0 => throw .deterministicTimeout
   | fuel+1 => do
     let env ← getKEnv
-    let t ← whnfCore' t 
+    let t ← whnfCoreFn 0 t 
     if let some t ← reduceNative env t then return t
     if let some t ← reduceNat t then return t
     let some t := unfoldDefinition env t | return t
