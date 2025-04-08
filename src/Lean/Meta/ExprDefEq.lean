@@ -2194,7 +2194,7 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
       let mut lparams := []
       for (lmvarId, _) in (← getMCtx).lDepth do
         lparams := lmvarId.name :: lparams
-      let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel...") do
+      let ret ← withTraceNodeBefore `Meta.isDefEq (return m!"deferring check to kernel: {t}, {s}...") do
         -- let mut localDfEqs := []
         -- for decl in lctx do
         --   if let .app (.const ``localDfEq []) e := decl.type then

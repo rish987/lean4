@@ -243,6 +243,8 @@ def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems :
         if not (← isDefEqCore 999 lhs rhs) then
           ext_trace dbg do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
           return none
+        let prf := mkAppN (.const `Eq.refl [l]) #[T, lhs]
+        g.assign prf
         ext_trace dbg do pure s!"Reflection OK: {← ppExpr $ ← g.getType!}"
       ext_trace dbg do pure s!"Showing OK: {← ppExpr $ ← T.mvarId!.getType!}"
       let TInst ← instantiateMVars T
@@ -272,7 +274,7 @@ def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems :
 
   if let some (prf, ts) := ret? then
     if prf.hasExprMVar then
-      throw $ .other "unexpected mvar found in extensional equality proof"
+      throw $ .other s!"unexpected mvar found in extensional equality proof: {prf}"
     if ts.any (·.hasExprMVar) then
       throw $ .other "unexpected mvar found in extensionally assigned variable"
     -- check that the proof returned by unification is well-typed with the kernel itself,

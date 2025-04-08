@@ -124,7 +124,12 @@ def ensureType (e : Expr) : M Expr := do ensureSort (← inferType e) e
 @[export lean_kernel_is_def_eq_new]
 def isDefEqK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (a b : Expr) (fuel : Nat) (localDfEqs : List Expr) (options : Options) : EIO Kernel.Exception Bool :=
   M.run env.toKernelEnv env (lctx := lctx) (localDfEqs := localDfEqs) (safety := DefinitionSafety.safe) (fuel := fuel) (options := options) do
-    TypeChecker.isDefEqCheckTypes' (500 + n) lps a b
+    let ret ← try
+      TypeChecker.isDefEqCheckTypes' (500 + n) lps a b
+    catch e => 
+      dbg_trace s!"isDefEq error thrown: {← e.toMessageData {} |>.format}"
+      throw e
+    pure ret
 
 @[export lean_kernel_check_new]
 def checkK (n : Nat) (lps : List Name) (env : Lean.Environment) (lctx : LocalContext) (t : Expr) (options : Options) : EIO Kernel.Exception Expr :=

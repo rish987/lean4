@@ -70,9 +70,11 @@ example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := 
 -- 1 + y --> succ (zero + y)
 
 @[deq]
-theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
+theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : Nat.add x y = z := sorry
 
--- theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := rfl
+-- set_option trace.Kernel.ext true in
+-- set_option trace.Meta.isDefEq true in
+theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : Nat.add a b = c := Eq.refl c
 
 -- @[deq]
 -- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
