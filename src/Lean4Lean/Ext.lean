@@ -55,16 +55,16 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     sorry
     sorry
     sorry
-  let tryMatch t := 
-    match pattern, t with
+  let tryMatch p t := 
+    match p, t with
     | .lam .., .lam ..
     | .forallE .., .forallE ..
     | .letE .., .letE .. => do
-      let ret ← processBinding (← getLCtx) #[] pattern target
+      let ret ← processBinding (← getLCtx) #[] p t
       pure ret
     | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-    | .mdata _ a1, _ => isExprDefEq a1 target targetD (dbg := dbg)
-    | _, .mdata _ a2 => isExprDefEq pattern a2 targetD (dbg := dbg)
+    | .mdata _ a1, _ => isExprDefEq a1 t targetD (dbg := dbg)
+    | _, .mdata _ a2 => isExprDefEq p a2 targetD (dbg := dbg)
     | .lit a1, .lit a2 => pure (a1 == a2)
     | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s' (dbg := dbg)
     | .const n ls, .const n' ls' =>
@@ -82,13 +82,13 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     | _, .bvar .. => unreachable!
     | .mvar .., .mvar ..
     | _, .mvar .. => 
-      checkTypesAndAssign target pattern
+      checkTypesAndAssign t p
     | .mvar .., _ =>
-      checkTypesAndAssign pattern target
+      checkTypesAndAssign p t
     | _, _ =>
       pure false
 
-  if ← tryMatch target then
+  if ← tryMatch pattern target then
     return true
   let mut target' := target
   -- let targetD ← targetD.getDM $ getTypeInfo target'
@@ -108,7 +108,18 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     if let some newTarget := unfoldDefinition (← getKEnv) target' then
       target' ← whnfCoreNoExt 1006 newTarget
       -- target' ← pure newTarget
-      if ← tryMatch target' then return true
+      if ← tryMatch pattern target' then return true
+    else break
+
+  let mut pattern' := pattern
+
+  let mut i := 0
+  while true do
+    i := i + 1
+    if let some newPattern := unfoldDefinition (← getKEnv) pattern' then
+      pattern' ← whnfCoreNoExt 1007 newPattern
+      -- target' ← pure newTarget
+      if ← tryMatch pattern' target then return true
     else break
 
   pure false

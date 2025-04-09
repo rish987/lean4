@@ -39,7 +39,7 @@
 theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
 
 @[drw]
-theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
+theorem zeroAddComm : Nat.zero + n = n := sorry
 --
 -- -- @[rw] -- bad rule leading to non-termination
 -- -- theorem succComm : Nat.succ n = 1 + n := sorry
@@ -69,17 +69,18 @@ example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := 
 -- (1 + y) + x --> succ (zero + y) + x
 -- 1 + y --> succ (zero + y)
 
-@[deq]
-theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : Nat.add x y = z := sorry
+-- @[deq]
+-- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : Nat.add x y = z := sorry
 
 -- set_option trace.Kernel.ext true in
 -- set_option trace.Meta.isDefEq true in
-theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : Nat.add a b = c := Eq.refl c
+-- theorem ex (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : Nat.add a b = c := Eq.refl c
 
 -- @[deq]
 -- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
--- theorem ex3 (h : ldeq ((x y z : Nat) → (hy : y = 0) → (hz : z = x) → x + y = z)) (a b c : Nat) (ha : b ≡ 0) (hc : c ≡ a) : a + b = c := Eq.refl (c)
+-- (h : ((a b ?1 ?2 : Nat) → (hy : b = 0) → (hz : ?1 + ?2 = a) → a + b ⇛ ?1 + ?2))
+theorem ex3 (h : ((x y z w : Nat) → (hy : y = 0) → (hz : z + w = x) → x + y ≡ z + w)) (a b c d : Nat) (ha : b ≡ 0) (hc : c + d ≡ a) : a + b = c + d := Eq.refl _
 
 -- example (a b c : Nat) (ha : b = 0) (hc : c = a) : a + b = c := ex a b c ha hc
 -- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
