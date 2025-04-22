@@ -310,7 +310,7 @@ def whnfCoreNoExt' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Ex
 
 def ext : Bool := true
 
-def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr := do
+def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM Expr := do
   match e with
   | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return e
   | .fvar id => if !isLetFVar (← getLCtx) id then return e
@@ -331,7 +331,8 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
       ext_trace dbg do pure s!"DBG[1]: TypeChecker.lean:345: e'={← ppExpr e}"
       -- dbg_trace s!"DBG[1]: TypeChecker.lean:333: {newe}"
       newe ← newe.replaceMFVars fun sube => do
-        let ret ← reduceExt 0 sube (dbg := dbg)
+        let skipLem? := if newe == sube then skipLem? else none
+        let ret ← reduceExt 0 sube (dbg := dbg) skipLem?
         pure ret
         -- pure none
       -- dbg_trace s!"DBG[2]: TypeChecker.lean:333: {newe}"
@@ -634,9 +635,9 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   let getVars rev :=
     let eq := if rev then mkAppN (.const `Eq [l]) #[T, s, t] else mkAppN (.const `Eq [l]) #[T, t, s]
     [fun _ => eq]
-  if let some (_, _) ← extMatch 101 (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') then 
+  if let some (_, _) ← extMatch 101 (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
     return .true
-  if let some (_, _) ← extMatch 102 (getVars true) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') then 
+  if let some (_, _) ← extMatch 102 (getVars true) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
     return .true
   return .undef
 

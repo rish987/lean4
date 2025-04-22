@@ -19,21 +19,27 @@ abbrev InferCache := ExprMap Expr
 
 inductive CallData where
 |  isDefEqCore : Expr → Expr → CallData
-|  whnfCore (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
+|  whnfCore (e : Expr) (cheapRec : Bool) (cheapProj : Bool) (skipLem? : Option (Name ⊕ FVarId) := none) : CallData
 |  whnfCoreNoExt (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
 |  whnf (e : Expr) (ext : Bool) : CallData
 |  inferType (e : Expr) (inferOnly : Bool) : CallData
-|  extMatch (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : CallData
+|  extMatch (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : CallData
 deriving Inhabited
 
 instance : ToString CallData where
 toString
 | .isDefEqCore t s     => s!"isDefEqCore ({t}) ({s})"
-| .whnfCore e k p      => s!"whnfCore ({e}) {k} {p}"
+| .whnfCore e k p _    => s!"whnfCore ({e}) {k} {p} "
 | .whnfCoreNoExt e k p => s!"whnfCore ({e}) {k} {p}"
 | .whnf e ext          => s!"whnf ({e}, {ext})"
 | .inferType e d       => s!"inferType ({e}) ({d})"
-| .extMatch ..         => s!"extMatch"
+| .extMatch getT ..    => Id.run $ do
+    let mut es := #[]
+    let mut subs := []
+    for i in [:getT.length] do
+      es := es.push (getT[i]! subs)
+      subs := subs ++ [Expr.bvar i]
+    pure s!"extMatch {es}"
 
 def CallData.name : CallData → String
 | .isDefEqCore ..     => "isDefEqCore"
@@ -68,6 +74,7 @@ structure TypeChecker.Context where
   env : Kernel.Environment
   env' : Environment
   lctx : LocalContext := {}
+  extLemsReducing : NameSet := default
   options : Options := default
   fuel : Nat := 5
   safety : DefinitionSafety := .safe
@@ -82,6 +89,9 @@ namespace TypeChecker
 
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (x : m α) : m α :=
   withReader (fun c => {c with callId := id}) x
+
+@[inline] def withExtLemReducing [MonadWithReaderOf Context m] (lemName : Name) (x : m α) : m α :=
+  withReader (fun c => {c with extLemsReducing := c.extLemsReducing.insert lemName}) x
 
 -- instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
 --   inferInstance
@@ -127,11 +137,11 @@ instance (priority := low) : MonadWithReaderOf LocalContext M where
 
 structure Methods where
   isDefEqCore : Nat → Expr → Expr → M Bool
-  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
+  whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Option (Name ⊕ FVarId)) : M Expr
   whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
   whnf (n : Nat) (e : Expr) (ext : Bool := true) : M Expr 
   inferType (n : Nat) (e : Expr) (inferOnly : Bool) : M Expr
-  extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : M (Option (Expr × List Expr))
+  extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : M (Option (Expr × List Expr))
 
 abbrev RecM := ReaderT Methods M
 
@@ -176,15 +186,15 @@ namespace Inner
 
 def isDefEqCore (n : Nat) (t s : Expr) : RecM Bool := fun m => m.isDefEqCore n t s
 
-def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
+def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Option (Name ⊕ FVarId) := none) : RecM Expr :=
   -- TODO what exactly is going on here?
-  fun m => m.whnfCore n e cheapRec cheapProj
+  fun m => m.whnfCore n e cheapRec cheapProj skipLem?
 
 def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   fun m => m.whnfCoreNoExt n e cheapRec cheapProj
 
-def extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) :=
-  fun m => m.extMatch n getT localMarker lems dbg
+def extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM (Option (Expr × List Expr)) :=
+  fun m => m.extMatch n getT localMarker lems dbg skipLem?
 
 def whnf (n : Nat) (e : Expr) (ext : Bool := true) : RecM Expr := fun m => m.whnf n e ext
 
@@ -205,7 +215,7 @@ def getTypeInfo (n : Nat) (t : Expr) : RecM (Level × Expr) := do
   let .sort l ← ensureSortCore tTT tT | unreachable!
   pure (l, tT)
 
-def reduceExt (n : Nat) (e : Expr) (dbg : Bool := false) : RecM (Option Expr) := do
+def reduceExt (n : Nat) (e : Expr) (dbg : Bool := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM (Option Expr) := do
   let (l, T) ← getTypeInfo 2 e
   let mut dbg := dbg
   -- if let (.app (.app (.const `Nat.add []) (.lit (.natVal 0))) n) := e then
@@ -213,7 +223,7 @@ def reduceExt (n : Nat) (e : Expr) (dbg : Bool := false) : RecM (Option Expr) :=
   --   if let .const `Nat.zero _  := x.getAppFn then
   --     dbg := true
   let getVars := [fun _ => T, fun ms => mkAppN (.const `Eq [l]) #[T, e, ms[0]!]]
-  if let some (_, ts) ← extMatch (100 + n) getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg then 
+  if let some (_, ts) ← extMatch (100 + n) getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg skipLem? then 
     return .some ts[0]!
   return none
 

@@ -15,7 +15,9 @@ def runMetaM (m : MetaM T) : RecM T := do
   | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
   | .inr (.error _ d) => throw $ .other (← d.toString)
 
-def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Expr) := none) (dbg := false) : RecM Bool := do
+def ppExpr (e : Expr) : RecM Format := runMetaM (Lean.Meta.ppExpr e)
+
+def isExprDefEq (pattern : Expr) (target : Expr) (lem : (Name ⊕ FVarId)) (targetD : Option (Level × Expr) := none) (dbg := false) : RecM Bool := do
   let rec checkTypesAndAssign (mvar : Expr) (v : Expr) : RecM Bool := do
     if !mvar.isMVar then
       -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
@@ -24,7 +26,8 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
       -- must check whether types are definitionally equal or not, before assigning and returning true
       let vType ← inferType 1000 v let mvarType ← mvar.mvarId!.getType!
       -- TODO ? if there are no metavars, do the normal isDefEq check
-      if (← isExprDefEq mvarType vType) then
+      if (← isExprDefEq mvarType vType lem) then -- TODO correct to pass in lem here?
+        -- dbg_trace s!"assigning {mvar} to {v}"
         mvar.mvarId!.assign v
         pure true
       else
@@ -36,7 +39,7 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     let process (n : Name) (d₁ d₂ b₁ b₂ : Expr) : RecM Bool := do
       let d₁     := d₁.instantiateRev fvars
       let d₂     := d₂.instantiateRev fvars
-      if not (← isExprDefEq d₁ d₂) then
+      if not (← isExprDefEq d₁ d₂ lem) then
         return false
       let fvarId ← mkFreshFVarId
       let lctx   := lctx.mkLocalDecl fvarId n d₁
@@ -45,10 +48,10 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
     match t, s with
     | .forallE n d₁ b₁ _,    .forallE _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
     | .lam     n d₁ b₁ _,    .lam     _ d₂ b₂ _    => process n d₁ d₂ b₁ b₂
-    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => process n d₁ d₂ b₁ b₂ <&&> (do isExprDefEq (← instantiateExprMVars v₁) (← instantiateExprMVars v₂))
+    | .letE    n d₁ v₁ b₁ _, .letE    _ d₂ v₂ b₂ _ => process n d₁ d₂ b₁ b₂ <&&> (do isExprDefEq (← instantiateExprMVars v₁) (← instantiateExprMVars v₂) lem)
     | _,                  _                  =>
       withLCtx lctx do
-        isExprDefEq (t.instantiateRev fvars) (s.instantiateRev fvars)
+        isExprDefEq (t.instantiateRev fvars) (s.instantiateRev fvars) lem
   termination_by sizeOf t
   decreasing_by
     sorry
@@ -63,20 +66,20 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
       let ret ← processBinding (← getLCtx) #[] p t
       pure ret
     | .sort a1, .sort a2 => pure (a1.isEquiv a2)
-    | .mdata _ a1, _ => isExprDefEq a1 t targetD (dbg := dbg)
-    | _, .mdata _ a2 => isExprDefEq p a2 targetD (dbg := dbg)
+    | .mdata _ a1, _ => isExprDefEq a1 t lem targetD (dbg := dbg)
+    | _, .mdata _ a2 => isExprDefEq p a2 lem targetD (dbg := dbg)
     | .lit a1, .lit a2 => pure (a1 == a2)
-    | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s' (dbg := dbg)
+    | .proj n i s, .proj n' i' s' => pure (n == n') <&&> pure (i == i') <&&> isExprDefEq s s' lem (dbg := dbg)
     | .const n ls, .const n' ls' =>
       let ret := n == n' && (ls.zip ls').all (fun (l, l') => l.isEquiv l')
       pure ret
     | .fvar id, .fvar id' => pure $ id == id'
     | .app f a, .app f' a' => do
-      let feq ← isExprDefEq f f' (dbg := dbg)
+      let feq ← isExprDefEq f f' lem (dbg := dbg)
       let a ← instantiateMVars a
       let a' ← instantiateMVars a'
       -- dbg_trace s!"DBG[19]: Ext.lean:70 {f}, {a}, {f'}, {a'}"
-      let aeq ← isExprDefEq a a' (dbg := dbg)
+      let aeq ← isExprDefEq a a' lem (dbg := dbg)
       pure $ feq && aeq
     | .bvar .., _ => unreachable!
     | _, .bvar .. => unreachable!
@@ -90,7 +93,11 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
 
   if ← tryMatch pattern target then
     return true
-  let mut target' := target
+
+  let mut target' ← whnfCoreNoExt 10061 target
+  if target' != target then
+    if ← tryMatch pattern target' then
+      return true
   -- let targetD ← targetD.getDM $ getTypeInfo target'
 
   while true do
@@ -111,13 +118,18 @@ def isExprDefEq (pattern : Expr) (target : Expr) (targetD : Option (Level × Exp
       if ← tryMatch pattern target' then return true
     else break
 
-  let mut pattern' := pattern
+  let mut pattern' ← whnfCore 10071 pattern
+  if pattern' != pattern then
+    if ← tryMatch pattern' target then -- TODO should use target' instead?
+      return true
+  -- let d := if let .app (.const `Nat.succ []) (.mvar ..) := pattern then true else false
+  let d := if let .app (Expr.const `Nat.succ []) (Expr.const `Nat.zero []) := target then true else false
 
   let mut i := 0
   while true do
     i := i + 1
     if let some newPattern := unfoldDefinition (← getKEnv) pattern' then
-      pattern' ← whnfCoreNoExt 1007 newPattern
+      pattern' ← whnfCore 1007 newPattern
       -- target' ← pure newTarget
       if ← tryMatch pattern' target then return true
     else break
@@ -173,7 +185,7 @@ def forallTelescope
 
 variable {m : Type → Type u} [Monad m] [MonadMCtx m] 
 
-def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) (dbg := false) : RecM (Option (Array MVarId)) := do
+def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) (dbg := false) (skipLem : Name ⊕ FVarId) : RecM (Option (Array MVarId)) := do
   let some targetType ← mvarId.getType? (m := RecM) | unreachable!
   let eType ← eType?.getDM (inferType 1001 e)
 
@@ -186,7 +198,7 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) (dbg := fa
 
   let newMVars : Array Expr ← do
     let (newMVars, eType) ← forallMetaTelescope eType
-    if not (← isExprDefEq eType targetType (dbg := dbg)) then
+    if not (← isExprDefEq eType targetType (dbg := dbg) (skipLem? := skipLem)) then
       return none
     else
       pure newMVars
@@ -198,8 +210,6 @@ def apply (mvarId : MVarId) (e : Expr) (eType? : Option Expr := none) (dbg := fa
   let newMVarIds := newMVars.map fun m => m.mvarId!
   return newMVarIds
 
-def ppExpr (e : Expr) : RecM Format := runMetaM (Lean.Meta.ppExpr e)
-
 def ext_trace (dbg : Bool) (getS : RecM String) : RecM Unit := do
   let mut print := dbg
   if let .some (.ofBool true) := (← getOptions).find `trace.Kernel.ext then
@@ -207,7 +217,7 @@ def ext_trace (dbg : Bool) (getS : RecM String) : RecM Unit := do
   if print then
     dbg_trace (← getS)
 
-def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) : RecM (Option (Expr × List Expr)) := do
+def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM (Option (Expr × List Expr)) := do
   if (← readThe Context).fuel == 0 then
     return none
   -- options := options.insert `trace.Meta.isDefEq (.ofBool true)
@@ -216,40 +226,46 @@ def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems :
   --   dbg_trace s!"DBG[387]: TypeChecker.lean:406 (after if dbg then)"
 
   let ret? ← (do
-    let mut localLems := []
+    let mut localLems : List (((Name ⊕ FVarId) × Expr) × Option Expr) := []
     for decl in (← getLCtx) do
+      if let .some (.inr lemFid) := skipLem? then
+        if decl.fvarId == lemFid then
+          continue
       -- if dbg then 
       --   dbg_trace s!"Checking: {decl.userName} : {← ppExpr decl.type}"
       if let .app (.const n []) _ := decl.type.getForallBody then -- TODO remove once we can generate lemmas for intermediate reducts
         if n == localMarker then
           let newType ← forallTelescope decl.type fun vs b => do pure $ (← getLCtx).mkForall vs b.appArg!
-          localLems := localLems ++ [(decl.toExpr, .some newType)]
+          localLems := localLems ++ [((.inr decl.fvarId, decl.toExpr), .some newType)]
           if dbg then 
             dbg_trace s!"Added: {decl.userName} : {← ppExpr decl.type}"
 
+    let mut lems := lems
+    if let .some (.inl lemName) := skipLem? then
+      lems := lems.filter (· != lemName)
     let lemInfos ← lems.mapM (fun l => do
         let some info := (← getKEnv).find? l | throw $ .other s!"failed to find extensional lemma {l} in environment"
         pure info
       )
-    let mut candidates := (← lemInfos.mapM (Lean.Meta.mkConstWithFreshMVarLevels' ·)).zip (List.replicate lems.length none)
-    candidates := candidates ++ localLems
-    let tryExtEq lem type? (T : Expr) (ts : List Expr) : RecM (Option (Expr × List Expr)) := do
+    let mut candidates : List ((((Name ⊕ FVarId) × Expr) × Option Expr) × Bool):= (← lemInfos.mapM (fun i => do pure (.inl i.name, ← Lean.Meta.mkConstWithFreshMVarLevels' i))).zip (List.replicate lems.length none) |>.zip (lems.map (fun n => n == `x))
+    candidates := candidates ++ (localLems.zip (List.replicate localLems.length false))
+    let tryExtEq lem type? (T : Expr) (ts : List Expr) (dbg : Bool) (skipLem : Name ⊕ FVarId) : RecM (Option (Expr × List Expr)) := do
       let condString := do pure s!"{← ppExpr $ ← T.mvarId!.getType!}"
       -- let dbg := (← readThe Core.Context).options.get? `trace.Kernel.ext
       ext_trace dbg do pure s!"Trying to show {← condString}"
       ext_trace dbg do pure s!"Trying to apply (fuel {(← readThe Context).fuel}): {← ppExpr $ lem} : {← ppExpr $ (← inferType 1002 lem)} to {← condString}"
-      let some gs ← apply T.mvarId! lem type? dbg |
+      let some gs ← apply T.mvarId! lem type? dbg skipLem |
         ext_trace dbg do pure s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← inferType 1003 lem)} to {← condString}"
         -- if dbg then
         --   dbg_trace s!"Applying FAIL: {← ppExpr $ lem} : {← ppExpr $ (← Meta.inferType lem)} to {← condString}"
         return none
 
-      ext_trace dbg do pure s!"Applying OK:{← ppExpr $ (← inferType 1004 lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
+      ext_trace dbg do pure s!"Applying OK ({gs.size}):{← ppExpr $ (← inferType 1004 lem)} to  {← condString}" --"\n  {← gs.mapM (fun (id : MVarId) => do ppExpr $ ← id.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       -- if dbg then
       --   dbg_trace s!"Applying OK:{← ppExpr $ (← Meta.inferType lem)} to  {← condString}" --"\n  {← gs.mapM (do ppExpr $ ← ·.getType)}\n  {← localLems.mapM (do ppExpr $ ← Meta.inferType ·.1)}"
       for g in gs do
         let gT ← g.getType!
-        let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"extensional hypothesis not of expected form: {gT}"
+        let .app (.app (.app (.const `Eq [l]) T) lhs) rhs := gT | throw $ .other s!"type of extensional hypothesis {g.name} not of expected form: {gT}"
         ext_trace dbg do pure s!"Trying reflection: {← ppExpr $ ← g.getType!}"
         if not (← isDefEqCore 999 lhs rhs) then
           ext_trace dbg do pure s!"Reflection FAIL: {← ppExpr $ ← g.getType!}"
@@ -272,12 +288,12 @@ def extMatch' (getTs : (List (List Expr → Expr))) (localMarker : Name) (lems :
 
     let (T, _) ← getMVars
 
-    for (lem, type?) in candidates do
+    for (((skipLem, lem), type?), dbg) in candidates do
       let (T, ts) ← getMVars
       -- for eqMvar in [tEqsMvar, sEqtMvar] do
       -- TODO is there a way to "undo" assignments from previous failed unification attempts,
       -- rather than making new mvars every time?
-      if let .some prf ← tryExtEq lem type? T ts then
+      if let .some prf ← tryExtEq lem type? T ts dbg skipLem then
         return some prf
     ext_trace dbg do pure s!"Showing FAIL: {← ppExpr $ ← T.mvarId!.getType!}"
     return none

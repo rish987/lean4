@@ -35,22 +35,27 @@
 --
 -- -- @[drw]
 -- -- theorem succAddComm (x : Nat) : (.succ x) + n = Nat.succ (x + n) := sorry
-@[drw]
-theorem succAddComm (x : Nat) : Nat.add (.succ x) n = Nat.succ (Nat.add x n) := sorry
+def s := Nat.succ
+def z := Nat.zero
+example : x + (s z) = s x := rfl
+
+def add' (n m : Nat) : Nat := Nat.rec n (fun _ ih => Nat.succ ih) m
 
 @[drw]
 theorem zeroAddComm : Nat.zero + n = n := sorry
---
+
+@[drw]
+-- theorem succAddComm (x : Nat) : (s x) + n = Nat.succ (Nat.add x n) := sorry
+theorem succAddComm (m n : Nat) : ((z + m) + (s z)) + n = Nat.succ (m + n) := sorry
+
 -- -- @[rw] -- bad rule leading to non-termination
 -- -- theorem succComm : Nat.succ n = 1 + n := sorry
 --
-def s := Nat.succ
-def z := Nat.zero
 
-def add := fun x y => Nat.add x y
+-- def add := fun x y => Nat.add x y
 
 -- set_option trace.Kernel.ext true in
-example : add z n = n := @Eq.refl _ n
+-- example : add z n = n := @Eq.refl _ n
 -- set_option trace.Kernel.ext true in
 -- example : add (add z (s z)) n = s n := rfl
 -- def vecTest (n : Nat) (v : Vec n) : Vec (Nat.add (.succ .zero) n) :=
@@ -62,8 +67,9 @@ example : add z n = n := @Eq.refl _ n
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
 -- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
-example (x y : Nat) : Nat.add y (.add (.succ .zero) x) = Nat.succ (.add y x) := by rfl
-example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
+-- set_option trace.Kernel.ext true in
+example (x y : Nat) : (Nat.succ Nat.zero) + x = Nat.succ x := by rfl
+-- example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
 -- (1 + y) + x --> succ (zero + y) + x

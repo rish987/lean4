@@ -7,6 +7,15 @@ open Lean
 
 def defFuel := 1000
 
+def printCallTrace (verbose : Bool := false) : M Unit := do
+  let l := (← readThe Context).callStack.map fun d => if verbose then s!"{d.1}/{toString d.2.2}" else s!"{d.1}"
+  -- let mut l := (← readThe Context).callStack.map fun d =>
+  --   let str := if d.1 == 44003 || d.1 == 43003 then s!" : {toString d.2.2}" else ""
+  --   s!"{d.1}{str}"
+  -- if l.size > 20 then
+  --   l := l[l.size - 20:]
+  dbg_trace s!">calltrace {(← get).numCalls}: {l}, {(← readThe Context).callId}"
+
 -- structure Methods where
 --   isDefEqCore : Nat → Expr → Expr → Level → Expr → MO T Bool
 --   whnfCore (e : Expr) (l : Option (Level × Expr) := none) (cheapRec := false) (cheapProj := false) : MO T Expr
@@ -22,13 +31,14 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
   match fuel with
     | 0 =>
       -- dbg_trace s!">deep recursion callstack: {(← readThe Context).callStack.map (·.1)}"
+      printCallTrace true
       throw .deepRecursion
     | fuel' + 1 =>
       let m : RecM (CallDataT d):=
         match d with
         | .isDefEqCore t s => isDefEqCoreCheckTypes t s
-        | .whnfCore e r p => do
-          let ret ← whnfCore' e r p
+        | .whnfCore e r p s => do
+          let ret ← whnfCore' e r p s
           -- dbg_trace s!"DBG[A]: TypeChecker.lean:440 {← getTrace true}"
           -- _ ← Inner.inferType 51 ret (inferOnly := false) 
           -- dbg_trace s!"DBG[B]: TypeChecker.lean:481 (after _ ← inferTypeCheck p)"
@@ -44,22 +54,16 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
           let l := (← readThe Context).callStack.map fun d => s!"{d.1}"
           let ret ← inferType' e o
           pure ret
-        | .extMatch g l m d => extMatch' g l m d
+        | .extMatch g l m d s => extMatch' g l m d s
       modify fun s => {s with numCalls := s.numCalls + 1} 
       let s ← get
       let mut printedTrace := false
       let print := false
       -- let print := true
-      if print && trace then
+      if print && trace && s.numCalls == 2236 then
         if true then
           printedTrace := true
-          -- let l := (← readThe Context).callStack.map fun d => s!"{d.1}/{d.2.1}"
-          let mut l := (← readThe Context).callStack.map fun d =>
-            let str := if d.1 == 44003 || d.1 == 43003 then s!" : {toString d.2.2}" else ""
-            s!"{d.1}{str}"
-          -- if l.size > 20 then
-          --   l := l[l.size - 20:]
-          dbg_trace s!">calltrace {s.numCalls}: {l}, {idx}, {(← readThe Context).callId}"
+          printCallTrace
       try
         let ret ← withCallId s.numCalls do
           if trace then
@@ -78,8 +82,8 @@ def Methods.withFuel (n : Nat) : Methods :=
   { isDefEqCore := fun i t s => do
       let ret ← (fuelWrap i n $ .isDefEqCore t s)
       pure ret
-    whnfCore := fun i e k p => do
-      let ret ← (fuelWrap i n $ .whnfCore e k p)
+    whnfCore := fun i e k p s => do
+      let ret ← (fuelWrap i n $ .whnfCore e k p s)
       pure ret
     whnfCoreNoExt := fun i e k p => do
       let ret ← (fuelWrap i n $ .whnfCoreNoExt e k p)
@@ -90,8 +94,8 @@ def Methods.withFuel (n : Nat) : Methods :=
     inferType := fun i e o => do
       let ret ← (fuelWrap i n $ .inferType e o)
       pure $ ret
-    extMatch := fun i g l m d => do
-      let ret ← (fuelWrap i n $ .extMatch g l m d)
+    extMatch := fun i g l m d s => do
+      let ret ← (fuelWrap i n $ .extMatch g l m d s)
       pure $ ret
   }
 end
