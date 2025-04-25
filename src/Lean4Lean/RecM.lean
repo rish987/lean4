@@ -23,7 +23,7 @@ inductive CallData where
 |  whnfCoreNoExt (e : Expr) (cheapRec : Bool) (cheapProj : Bool) : CallData
 |  whnf (e : Expr) (ext : Bool) : CallData
 |  inferType (e : Expr) (inferOnly : Bool) : CallData
-|  extMatch (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : CallData
+|  extMatch (typ : Expr )(getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : CallData
 deriving Inhabited
 
 instance : ToString CallData where
@@ -33,13 +33,13 @@ toString
 | .whnfCoreNoExt e k p => s!"whnfCore ({e}) {k} {p}"
 | .whnf e ext          => s!"whnf ({e}, {ext})"
 | .inferType e d       => s!"inferType ({e}) ({d})"
-| .extMatch getT ..    => Id.run $ do
+| .extMatch T getT ..    => Id.run $ do
     let mut es := #[]
     let mut subs := []
     for i in [:getT.length] do
       es := es.push (getT[i]! subs)
       subs := subs ++ [Expr.bvar i]
-    pure s!"extMatch {es}"
+    pure s!"extMatch ({T}): {es}"
 
 def CallData.name : CallData → String
 | .isDefEqCore ..     => "isDefEqCore"
@@ -70,12 +70,17 @@ structure TypeChecker.State where
   numCalls : Nat := 0
   -- traceState : TraceState := default
 
+structure IsDefEqOpts where
+  ext : Bool := false
+deriving Inhabited
+
 structure TypeChecker.Context where
   env : Kernel.Environment
   env' : Environment
   lctx : LocalContext := {}
-  extLemsReducing : NameSet := default
+  extLemsReducing : List (Name ⊕ FVarId) := default
   options : Options := default
+  dfEqOpts : IsDefEqOpts := default
   fuel : Nat := 5
   safety : DefinitionSafety := .safe
   lparams : List Name := []
@@ -87,10 +92,13 @@ namespace TypeChecker
 @[inline] def withCallData [MonadWithReaderOf Context m] (i : Nat) (id : Nat) (d : CallData) (x : m α) : m α :=
   withReader (fun c => {c with callStack := c.callStack.push (i, id, d)}) x
 
+@[inline] def withDfEqOpts [MonadWithReaderOf Context m] (o : IsDefEqOpts) (x : m α) : m α :=
+  withReader (fun c => {c with dfEqOpts := o}) x
+
 @[inline] def withCallId [MonadWithReaderOf Context m] (id : Nat) (x : m α) : m α :=
   withReader (fun c => {c with callId := id}) x
 
-@[inline] def withExtLemReducing [MonadWithReaderOf Context m] (lemName : Name) (x : m α) : m α :=
+@[inline] def withExtLemReducing [MonadWithReaderOf Context m] (lemName : Name ⊕ FVarId) (x : m α) : m α :=
   withReader (fun c => {c with extLemsReducing := c.extLemsReducing.insert lemName}) x
 
 -- instance (ω σ : Type) : MonadControl MetaM (StateT ω MetaM) :=
@@ -141,7 +149,7 @@ structure Methods where
   whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : M Expr
   whnf (n : Nat) (e : Expr) (ext : Bool := true) : M Expr 
   inferType (n : Nat) (e : Expr) (inferOnly : Bool) : M Expr
-  extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : M (Option (Expr × List Expr))
+  extMatch (n : Nat) (typ : Expr) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : M (Option (Expr × List Expr))
 
 abbrev RecM := ReaderT Methods M
 
@@ -193,8 +201,8 @@ def whnfCore (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) (skip
 def whnfCoreNoExt (n : Nat) (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
   fun m => m.whnfCoreNoExt n e cheapRec cheapProj
 
-def extMatch (n : Nat) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM (Option (Expr × List Expr)) :=
-  fun m => m.extMatch n getT localMarker lems dbg skipLem?
+def extMatch (n : Nat) (typ : Expr) (getT : (List (List Expr → Expr))) (localMarker : Name) (lems : List Name) (dbg := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM (Option (Expr × List Expr)) :=
+  fun m => m.extMatch n typ getT localMarker lems dbg skipLem?
 
 def whnf (n : Nat) (e : Expr) (ext : Bool := true) : RecM Expr := fun m => m.whnf n e ext
 
@@ -223,9 +231,15 @@ def reduceExt (n : Nat) (e : Expr) (dbg : Bool := false) (skipLem? : Option (Nam
   --   if let .const `Nat.zero _  := x.getAppFn then
   --     dbg := true
   let getVars := [fun _ => T, fun ms => mkAppN (.const `Eq [l]) #[T, e, ms[0]!]]
-  if let some (_, ts) ← extMatch (100 + n) getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg skipLem? then 
+  if let some (_, ts) ← extMatch (100 + n) T getVars ``ldrw (Lean.Meta.DfEq.rwExt.getState (← readThe Context).env') dbg skipLem? then 
     return .some ts[0]!
   return none
+
+def mkFreshId'.{u} {m : Type → Type u} [Monad m] [MonadNameGenerator m] (n : Nat) : m FVarId := do
+  let id := ← mkFreshId
+  -- if id == "_kernel_fresh.2769".toName then
+  --   dbg_trace s!"DBG[412]: RecM.lean:240 {n}"
+  pure ⟨id⟩
 
 -- instance : MonadTrace (RecMO T) :=
 --   inferInstance

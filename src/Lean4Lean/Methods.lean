@@ -7,8 +7,32 @@ open Lean
 
 def defFuel := 1000
 
+def runMetaM (m : MetaM T) : M T := do
+  let mut options := (← readThe Context).options
+  let m' := Lean.Meta.MetaM.run m {lctx := ← getLCtx} {mctx := ← getMCtx}|>.run {options := options, fileName := default, fileMap := default, maxHeartbeats := 0} {env := (← readThe Context).env'}
+  match ← toKernelException m' with
+  | .inl ((reqs, _), _) => pure reqs
+  | .inr (.internal _ _) => throw $ .other "untranslated Exception.Internal"
+  | .inr (.error _ d) => throw $ .other (← d.toString)
+
+def ppExpr (e : Expr) : M Format := runMetaM (Lean.Meta.ppExpr e)
+
+def _root_.Lean.CallData.toString : CallData → M String
+| .isDefEqCore t s     => do pure s!"isDefEqCore ({← ppExpr t}) ({← ppExpr s})"
+| .whnfCore e k p _    => do pure s!"whnfCore ({← ppExpr e}) {k} {p} "
+| .whnfCoreNoExt e k p => do pure s!"whnfCore ({← ppExpr e}) {k} {p}"
+| .whnf e ext          => do pure s!"whnf ({← ppExpr e}, {ext})"
+| .inferType e d       => do pure s!"inferType ({← ppExpr e}) ({d})"
+| .extMatch T getT ..    => do
+    let mut es := #[]
+    let mut subs := []
+    for i in [:getT.length] do
+      es := es.push (getT[i]! subs)
+      subs := subs ++ [Expr.bvar i]
+    pure s!"extMatch ({T}): {← es.mapM ppExpr}"
+
 def printCallTrace (verbose : Bool := false) : M Unit := do
-  let l := (← readThe Context).callStack.map fun d => if verbose then s!"{d.1}/{toString d.2.2}" else s!"{d.1}"
+  let l ← (← readThe Context).callStack.mapM fun d => do if verbose then pure s!"{d.1}/{← d.2.2.toString}" else pure s!"{d.1}"
   -- let mut l := (← readThe Context).callStack.map fun d =>
   --   let str := if d.1 == 44003 || d.1 == 43003 then s!" : {toString d.2.2}" else ""
   --   s!"{d.1}{str}"
@@ -54,13 +78,14 @@ def fuelWrap (idx : Nat) (fuel : Nat) (d : CallData) : M (CallDataT d) := do
           let l := (← readThe Context).callStack.map fun d => s!"{d.1}"
           let ret ← inferType' e o
           pure ret
-        | .extMatch g l m d s => extMatch' g l m d s
+        | .extMatch T g l m d s => extMatch' T g l m d s
       modify fun s => {s with numCalls := s.numCalls + 1} 
       let s ← get
       let mut printedTrace := false
       let print := false
       -- let print := true
-      if print && trace && s.numCalls == 2236 then
+      if print && trace then
+      -- if print && trace && s.numCalls == 2236 then
         if true then
           printedTrace := true
           printCallTrace
@@ -94,8 +119,8 @@ def Methods.withFuel (n : Nat) : Methods :=
     inferType := fun i e o => do
       let ret ← (fuelWrap i n $ .inferType e o)
       pure $ ret
-    extMatch := fun i g l m d s => do
-      let ret ← (fuelWrap i n $ .extMatch g l m d s)
+    extMatch := fun i T g l m d s => do
+      let ret ← (fuelWrap i n $ .extMatch T g l m d s)
       pure $ ret
   }
 end

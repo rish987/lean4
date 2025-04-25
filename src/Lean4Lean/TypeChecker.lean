@@ -30,7 +30,7 @@ def checkLevel (tc : Context) (l : Level) : EIO KernelException Unit := do
 def inferFVar (tc : Context) (name : FVarId) : EIO KernelException Expr := do
   if let some decl := tc.lctx.find? name then
     return decl.type
-  throw <| .other "unknown free variable"
+  throw <| .other s!"unknown free variable {name.name}"
 
 def inferMVar (tc : State) (name : MVarId) : EIO KernelException Expr := do
   if let some decl := tc.mctx.findDecl? name then
@@ -60,7 +60,7 @@ def inferLambda (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
   loop fvars : Expr → RecM Expr
   | .lam name dom body bi => do
     let d := dom.instantiateRev fvars
-    let id := ⟨← mkFreshId⟩
+    let id := ← mkFreshId' 0
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       if !inferOnly then
@@ -78,7 +78,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
     let d := dom.instantiateRev fvars
     let t1 ← ensureSortCore (← inferType 30 d inferOnly) d
     let us := us.push t1.sortLevel!
-    let id := ⟨← mkFreshId⟩
+    let id := ← mkFreshId' 1
     withLCtx ((← getLCtx).mkLocalDecl id name d bi) do
       let fvars := fvars.push (.fvar id)
       loop fvars us body
@@ -126,7 +126,7 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e where
   | .letE name type val body _ => do
     let type := type.instantiateRev fvars
     let val := val.instantiateRev fvars
-    let id := ⟨← mkFreshId⟩
+    let id := ← mkFreshId' 2
     withLCtx ((← getLCtx).mkLetDecl id name type val) do
       let fvars := fvars.push (.fvar id)
       let vals := vals.push val
@@ -312,7 +312,8 @@ def ext : Bool := true
 
 def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Option (Name ⊕ FVarId)) : RecM Expr := do
   match e with
-  | .bvar .. | .sort .. | .mvar .. | .forallE .. | .const .. | .lam .. | .lit .. => return e
+  | .bvar .. | .sort .. | .forallE .. | .const .. | .lam .. | .lit .. => return e
+  | .mvar mid => if ← mid.isAssigned then return ← instantiateMVars e
   | .fvar id => if !isLetFVar (← getLCtx) id then return e
   | _ => pure ()
   let dbg := 
@@ -323,11 +324,11 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Op
   -- if dbg then
   --   dbg_trace s!"DBG[376]: TypeChecker.lean:484 {e'}"
   --
-  let mut e := e
+  let mut e ← whnfCoreNoExt' e cheapRec cheapProj
 
-  while true do
-    let mut newe := e
-    if ext then
+  if ext then
+    while true do
+      let mut newe := e
       ext_trace dbg do pure s!"DBG[1]: TypeChecker.lean:345: e'={← ppExpr e}"
       -- dbg_trace s!"DBG[1]: TypeChecker.lean:333: {newe}"
       newe ← newe.replaceMFVars fun sube => do
@@ -336,11 +337,11 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) (skipLem? : Op
         pure ret
         -- pure none
       -- dbg_trace s!"DBG[2]: TypeChecker.lean:333: {newe}"
-    newe ← whnfCoreNoExt' newe cheapRec cheapProj
-    if newe == e then
-      break
-    else
-      e := newe
+      newe ← whnfCoreNoExt' newe cheapRec cheapProj
+      if newe == e then
+        break
+      else
+        e := newe
 
   pure e
 
@@ -426,7 +427,7 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       pure (some sType)
     else pure none
     let sType := sType.getD (sDom.instantiateRev subst)
-    let id := ⟨← mkFreshId⟩
+    let id := ← mkFreshId' 3
     withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
       isDefEqLambda tBody sBody (subst.push (.fvar id))
   | t, s => isDefEqCheckTypes 18 (t.instantiateRev subst) (s.instantiateRev subst)
@@ -442,7 +443,7 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       else pure none
     let cont := do
       let sType := sType.getD (sDom.instantiateRev subst)
-      let id := ⟨← mkFreshId⟩
+      let id := ← mkFreshId' 4
       withLCtx ((← getLCtx).mkLocalDecl id name sType bi) do
         isDefEqForall tBody sBody (subst.push (.fvar id))
     -- if let .app (.const ``localDfEq []) _ := sDom then
@@ -455,18 +456,63 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
     cont
   | t, s => isDefEqCheckTypes 20 (t.instantiateRev subst) (s.instantiateRev subst)
 
+def checkTypesAndAssign (mvar : Expr) (v : Expr) : RecM Bool := do
+  if !mvar.isMVar then
+    -- trace[Meta.isDefEq.assign.checkTypes] "metavariable expected"
+    return false
+  else
+    -- must check whether types are definitionally equal or not, before assigning and returning true
+    let vType ← inferType 1000 v let mvarType ← mvar.mvarId!.getType!
+    -- TODO ? if there are no metavars, do the normal isDefEq check
+    if (← isDefEq 1112 mvarType vType) then -- TODO correct to pass in lem here?
+      -- dbg_trace s!"assigning {mvar} to {v}"
+      mvar.mvarId!.assign v
+      pure true
+    else
+      pure false
+
 def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) =>
-    let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
-  then return .true
-  match t, s with
-  | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
-  | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
-  | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
-  | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq 4 a1 a2
-  | .lit a1, .lit a2 => pure (a1 == a2).toLBool
-  | _, _ => return .undef
+  let wrapRestoreMctx f := do
+    let mctx := (← get).mctx
+    let ret ← f
+    if ret != .true then
+      modify fun s => {s with mctx}
+    pure ret
+  wrapRestoreMctx <| do
+    if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m)) =>
+      let (b, m) := m.isEquiv useHash t s
+      (b, .mk a1 a2 a3 a4 a5 a6 a7 a8 (eqvManager := m))
+    then return .true
+    if (← readThe Context).dfEqOpts.ext then
+      match t, s with -- TODO check app in the ext case
+      | .app f a, .app g b =>
+        if ← isDefEq 0 f g then
+          if ← isDefEq 0 a b then
+            return .true
+          else
+            return .undef
+        else
+          return .undef
+      | _, _ => pure ()
+    match t, s with -- TODO check app in the ext case
+    | .const tf tl, .const sf sl => -- TODO restrict to ext case
+      if tf == sf && Level.isEquivList tl sl then return .true
+      else return .undef
+    | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
+    | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
+    | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
+    | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq 4 a1 a2
+    -- | .mvar .., .mvar id
+    -- | _, .mvar id => -- TODO test this specifically
+    --   if not (← id.isAssigned) then
+    --     toLBoolM (checkTypesAndAssign s t)
+    --   else return .undef
+    -- | .mvar id, _ =>
+    --   if not (← id.isAssigned) then
+    --     toLBoolM (checkTypesAndAssign t s)
+    --   else return .undef
+    | .lit a1, .lit a2 => pure (a1 == a2).toLBool
+    | _, _ => return .undef
 
 def isDefEqArgs (t s : Expr) : RecM Bool := do
   match t, s with
@@ -635,9 +681,9 @@ def isDefEqExt (t s : Expr) (l : Level) (T : Expr) : RecM LBool := do
   let getVars rev :=
     let eq := if rev then mkAppN (.const `Eq [l]) #[T, s, t] else mkAppN (.const `Eq [l]) #[T, t, s]
     [fun _ => eq]
-  if let some (_, _) ← extMatch 101 (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
+  if let some (_, _) ← extMatch 101 T (getVars false) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
     return .true
-  if let some (_, _) ← extMatch 102 (getVars true) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
+  if let some (_, _) ← extMatch 102 T (getVars true) ``ldeq (DfEq.dfEqExt.getState (← readThe Context).env') false none then 
     return .true
   return .undef
 
@@ -646,6 +692,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   -- for decl in (← readThe Context).lctx do
   --   if let .app (.const ``localRw []) _ := decl.type.getForallBody then
   --     localRws := localRws ++ [decl.toExpr]
+  -- TODO extOpt option to immediately try isDefEqApp in the case of doing an extensional lemma match?
   
   let mut dbg := false
   -- if let (.app (.app (.const ``Nat.add []) (.const ``Nat.zero [])) (.fvar a)) := s then
@@ -713,7 +760,7 @@ def isDefEqCore' (t s : Expr) : RecM Bool := do
   -- if dbg then
   --   dbg_trace s!"DBG[370]: TypeChecker.lean:877 (after return r == .true)"
 
-  if ext then
+  if false then -- TODO re-enable
     let r' ← isDefEqExt t s l T
     if r' != .undef then
       return r' == .true

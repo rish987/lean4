@@ -42,11 +42,20 @@ example : x + (s z) = s x := rfl
 def add' (n m : Nat) : Nat := Nat.rec n (fun _ ih => Nat.succ ih) m
 
 @[drw]
-theorem zeroAddComm : Nat.zero + n = n := sorry
+theorem zeroAddComm : Nat.add Nat.zero n = n := sorry
+
+theorem ex : Nat.add Nat.zero n = n := by rfl
 
 @[drw]
--- theorem succAddComm (x : Nat) : (s x) + n = Nat.succ (Nat.add x n) := sorry
-theorem succAddComm (m n : Nat) : ((z + m) + (s z)) + n = Nat.succ (m + n) := sorry
+-- -- theorem succAddComm (x : Nat) : (s x) + n = Nat.succ (Nat.add x n) := sorry
+-- theorem succAddComm (n : Nat) : Nat.add (Nat.succ Nat.zero) n = Nat.succ n := sorry
+-- @[drw]
+theorem zeroAddComm2 : Nat.add Nat.zero Nat.zero = Nat.zero := sorry
+
+set_option trace.Kernel.ext true in
+theorem ex2 (n : Nat) : Nat.add Nat.zero n = n := by rfl
+
+-- theorem ex2 (m n : Nat) : ((m) + (s z)) + n = Nat.succ (m + n) := rfl
 
 -- -- @[rw] -- bad rule leading to non-termination
 -- -- theorem succComm : Nat.succ n = 1 + n := sorry
@@ -67,8 +76,10 @@ theorem succAddComm (m n : Nat) : ((z + m) + (s z)) + n = Nat.succ (m + n) := so
 -- set_option trace.Meta.isDefEq true in
 -- example : Nat := 1
 -- example (x y : Nat) : y + (1 + x) = Nat.succ (y + x) := by rfl
+-- set_option maxHeartbeats 0
 -- set_option trace.Kernel.ext true in
-example (x y : Nat) : (Nat.succ Nat.zero) + x = Nat.succ x := by rfl
+--example (x y : Nat) : (Nat.succ Nat.zero) + x = Nat.succ x := by rfl
+-- example (x y : Nat) : Nat.zero + x = x := by rfl
 -- example (x y : Nat) : Nat.add (.add (.succ .zero) y) x = Nat.succ (.add y x) := by rfl
 -- example (xy : Nat) : Nat.add (Nat.add 1 y) x = Nat.succ (Nat.add y x) := rfl -- does not work, need some way to mark the first argument for eager expansion
 
@@ -86,7 +97,7 @@ example (x y : Nat) : (Nat.succ Nat.zero) + x = Nat.succ x := by rfl
 -- theorem h (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
 
 -- (h : ((a b ?1 ?2 : Nat) → (hy : b = 0) → (hz : ?1 + ?2 = a) → a + b ⇛ ?1 + ?2))
-theorem ex3 (h : ((x y z w : Nat) → (hy : y = 0) → (hz : z + w = x) → x + y ≡ z + w)) (a b c d : Nat) (ha : b ≡ 0) (hc : c + d ≡ a) : a + b = c + d := Eq.refl _
+-- theorem ex3 (h : ((x y z w : Nat) → (hy : y = 0) → (hz : z + w = x) → x + y ≡ z + w)) (a b c d : Nat) (ha : b ≡ 0) (hc : c + d ≡ a) : a + b = c + d := Eq.refl _
 
 -- example (a b c : Nat) (ha : b = 0) (hc : c = a) : a + b = c := ex a b c ha hc
 -- theorem thm (x y z : Nat) (hy : y = 0) (hz : z = x) : x + y = z := sorry
