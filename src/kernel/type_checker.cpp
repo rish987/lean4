@@ -113,13 +113,34 @@ expr type_checker::infer_constant(expr const & e, bool infer_only) {
     return instantiate_type_lparams(info, ls);
 }
 
+/* Returns an fvar name for a binder of domain type `dom`, reusing a name prefix across binders
+   that share the same domain type. This makes alpha-equivalent subterms occurring under
+   different binder contexts literally equal, so they hit `m_eqv_manager` and the other
+   expr-keyed caches far more often (see lean4lean PR #5). Within a prefix we pick the lowest
+   numeral not currently bound in `m_lctx`, so the returned name never collides with an fvar
+   already in scope; hence reuse never conflates two distinct in-scope variables. */
+name type_checker::mk_reused_fvar_name(expr const & dom) {
+    auto it = m_st->m_fvar_type_to_reused_name.find(dom);
+    if (it != m_st->m_fvar_type_to_reused_name.end()) {
+        name const & prefix = it->second;
+        unsigned count = 0;
+        while (m_lctx.find_local_decl(name(prefix, count)))
+            count++;
+        return name(prefix, count);
+    } else {
+        name prefix = m_st->m_ngen.next();
+        m_st->m_fvar_type_to_reused_name.insert(mk_pair(dom, prefix));
+        return name(prefix, 0u);
+    }
+}
+
 expr type_checker::infer_lambda(expr const & _e, bool infer_only) {
     flet<local_ctx> save_lctx(m_lctx, m_lctx);
     buffer<expr> fvars;
     expr e = _e;
     while (is_lambda(e)) {
         expr d    = instantiate_rev(binding_domain(e), fvars.size(), fvars.data());
-        expr fvar = m_lctx.mk_local_decl(m_st->m_ngen, binding_name(e), d, binding_info(e));
+        expr fvar = m_lctx.mk_local_decl(mk_reused_fvar_name(d), binding_name(e), d, binding_info(e)).mk_ref();
         fvars.push_back(fvar);
         if (!infer_only) {
             ensure_sort_core(infer_type_core(d, infer_only), d);
@@ -140,7 +161,7 @@ expr type_checker::infer_pi(expr const & _e, bool infer_only) {
         expr d  = instantiate_rev(binding_domain(e), fvars.size(), fvars.data());
         expr t1 = ensure_sort_core(infer_type_core(d, infer_only), d);
         us.push_back(sort_level(t1));
-        expr fvar  = m_lctx.mk_local_decl(m_st->m_ngen, binding_name(e), d, binding_info(e));
+        expr fvar  = m_lctx.mk_local_decl(mk_reused_fvar_name(d), binding_name(e), d, binding_info(e)).mk_ref();
         fvars.push_back(fvar);
         e = binding_body(e);
     }
@@ -705,7 +726,7 @@ bool type_checker::is_def_eq_binding(expr t, expr s) {
             // free variable is used inside t or s
             if (!var_s_type)
                 var_s_type = instantiate_rev(binding_domain(s), subst.size(), subst.data());
-            subst.push_back(m_lctx.mk_local_decl(m_st->m_ngen, binding_name(s), *var_s_type, binding_info(s)));
+            subst.push_back(m_lctx.mk_local_decl(mk_reused_fvar_name(*var_s_type), binding_name(s), *var_s_type, binding_info(s)).mk_ref());
         } else {
             subst.push_back(*g_dont_care); // don't care
         }
@@ -1143,7 +1164,7 @@ expr type_checker::eta_expand(expr const & e) {
     expr it = e;
     while (is_lambda(it)) {
         expr d = instantiate_rev(binding_domain(it), fvars.size(), fvars.data());
-        fvars.push_back(m_lctx.mk_local_decl(m_st->m_ngen, binding_name(it), d, binding_info(it)));
+        fvars.push_back(m_lctx.mk_local_decl(mk_reused_fvar_name(d), binding_name(it), d, binding_info(it)).mk_ref());
         it     = binding_body(it);
     }
     it = instantiate_rev(it, fvars.size(), fvars.data());
@@ -1151,7 +1172,7 @@ expr type_checker::eta_expand(expr const & e) {
     if (!is_pi(it_type)) return e;
     buffer<expr> args;
     while (is_pi(it_type)) {
-        expr arg = m_lctx.mk_local_decl(m_st->m_ngen, binding_name(it_type), binding_domain(it_type), binding_info(it_type));
+        expr arg = m_lctx.mk_local_decl(mk_reused_fvar_name(binding_domain(it_type)), binding_name(it_type), binding_domain(it_type), binding_info(it_type)).mk_ref();
         args.push_back(arg);
         fvars.push_back(arg);
         it_type  = whnf(instantiate(binding_body(it_type), arg));

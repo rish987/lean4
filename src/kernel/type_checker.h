@@ -34,6 +34,11 @@ public:
         equiv_manager             m_eqv_manager;
         expr_pair_set             m_failure;
         expr_map<expr>            m_unfold;
+        /* Maps a binder domain type to a reusable fvar name prefix, so that binders sharing a
+           domain type reuse fvar names. This makes alpha-equivalent subterms literally equal and
+           thus hit `m_eqv_manager` (and the other expr-keyed caches) far more often. See the
+           lean4lean fvar-reuse optimization (digama0/lean4lean#5). */
+        expr_map<name>            m_fvar_type_to_reused_name;
         friend type_checker;
     public:
         state(environment const & env);
@@ -58,6 +63,7 @@ private:
 
     expr ensure_sort_core(expr e, expr const & s);
     expr ensure_pi_core(expr e, expr const & s);
+    name mk_reused_fvar_name(expr const & dom);
     void check_level(level const & l);
     expr infer_fvar(expr const & e);
     expr infer_constant(expr const & e, bool infer_only);
